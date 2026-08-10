@@ -10,6 +10,8 @@
 	<string>co.oschlo.schous</string>
 	<key>CFBundleExecutable</key>
 	<string>Schous</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

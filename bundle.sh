@@ -14,6 +14,11 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Schous"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 
+# Ikonet bygges fra pikselrutenettet i icon.py, så .icns er et byggeartefakt
+# og ikke en binærblob i git.
+/usr/bin/python3 icon.py >/dev/null
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+
 # ponytail: ad-hoc signering. Notarisering når appen faktisk skal distribueres.
 codesign --force --sign - "$APP"
 

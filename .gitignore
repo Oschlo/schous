@@ -10,3 +10,6 @@ Schous.app/
 *.aiff
 *.srt
 
+
+# ikon genereres av icon.py
+Resources/AppIcon.icns
