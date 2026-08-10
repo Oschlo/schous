@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 
 /// `Schous --selfcheck` — verifiserer at parserne matcher ekte backend-output.
@@ -5,6 +6,7 @@ import Foundation
 @MainActor
 func runSelfcheckAndExit() -> Never {
     segmentSelfcheck()
+    recorderSelfcheck()
 
     let job = TranscriptionJob()
 
@@ -89,6 +91,65 @@ private func verifyAgainstBackend(base: URL) {
         check(mine == theirs, ".\(ext) avviker fra backend:\nmin:  \(mine.debugDescription)\nderes: \(theirs.debugDescription)")
     }
     print("  verifisert mot backend: \(segs.count) segmenter, .txt og .srt byte-identiske")
+}
+
+/// Miksingen i Recorder.swift: kanaler innenfor en kilde snittes, kilder summeres.
+@MainActor
+private func recorderSelfcheck() {
+    // Stereo (snittes til 0.2, 0.4) + mono (0.1, 0.05) → 0.3, 0.45
+    let both = mix([(2, [0.2, 0.2, 0.4, 0.4]), (1, [0.1, 0.05])])
+    check(both ≈ [0.3, 0.45], "miks: \(both)")
+
+    // Én kilde alene skal komme uendret ut — ingen halvering.
+    let alone = mix([(1, [0.5, -0.5])])
+    check(alone ≈ [0.5, -0.5], "enkeltkilde: \(alone)")
+
+    // Summen går over taket når begge kildene er høye; da klippes den.
+    let loud = mix([(1, [0.9, -0.9]), (1, [0.9, -0.9])])
+    check(loud ≈ [1, -1], "klipping: \(loud)")
+
+    // Ulik lengde skal ikke kunne skje med driftskompensasjon på, men skal
+    // uansett aldri lese utenfor det korteste bufferet.
+    let ragged = mix([(1, [0.3, 0.3, 0.3]), (1, [0.2])])
+    check(ragged ≈ [0.5], "korteste buffer styrer: \(ragged)")
+
+    // Navnekollisjon når to opptak stoppes innen samme minutt.
+    let dir = URL(fileURLWithPath: "/tmp")
+    let now = Date()
+    var taken: Set<String> = []
+    let first = recordingURL(in: dir, at: now) { taken.contains($0.lastPathComponent) }
+    taken.insert(first.lastPathComponent)
+    let second = recordingURL(in: dir, at: now) { taken.contains($0.lastPathComponent) }
+    check(first.lastPathComponent.hasPrefix("Opptak-") && first.pathExtension == "m4a",
+          "opptaksnavn: \(first.lastPathComponent)")
+    check(second.lastPathComponent == first.lastPathComponent.dropLast(4) + "-2.m4a",
+          "kollisjon: \(second.lastPathComponent)")
+}
+
+/// Kjører `mixDown` mot en ekte AudioBufferList, slik IOProc-callbacken gjør.
+private func mix(_ sources: [(channels: Int, samples: [Float])], capacity: Int = 8) -> [Float] {
+    let list = AudioBufferList.allocate(maximumBuffers: sources.count)
+    defer {
+        for buf in list { buf.mData?.deallocate() }
+        free(list.unsafeMutablePointer)
+    }
+    for (i, source) in sources.enumerated() {
+        let mem = UnsafeMutablePointer<Float>.allocate(capacity: source.samples.count)
+        mem.update(from: source.samples, count: source.samples.count)
+        list[i] = AudioBuffer(mNumberChannels: UInt32(source.channels),
+                              mDataByteSize: UInt32(source.samples.count * MemoryLayout<Float>.size),
+                              mData: UnsafeMutableRawPointer(mem))
+    }
+    var out = [Float](repeating: 0, count: capacity)
+    let frames = out.withUnsafeMutableBufferPointer {
+        mixDown(list, into: $0.baseAddress!, capacity: capacity)
+    }
+    return Array(out.prefix(frames))
+}
+
+infix operator ≈: ComparisonPrecedence
+private func ≈ (a: [Float], b: [Float]) -> Bool {
+    a.count == b.count && zip(a, b).allSatisfy { abs($0 - $1) < 1e-6 }
 }
 
 private func check(_ ok: Bool, _ msg: @autoclosure () -> String) {

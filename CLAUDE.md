@@ -84,6 +84,41 @@ Both pipes are split on `\n` **and** `\r` — tqdm repaints with `\r`.
   Steps 1–3 are disk-cached and resume free. The confirmation dialog exists
   because of this; remove it only when those issues are fixed.
 
+## Menu bar recording (`Recorder.swift`)
+
+System audio comes from a **Core Audio process tap** (macOS 14.2+), not
+ScreenCaptureKit. That is why the app asks for no Screen Recording permission.
+`CATapDescription(stereoGlobalTapButExcludeProcesses: [])` → a **private**
+aggregate device whose only sub-device is the default output (it is there as a
+clock) → an IOProc. Private tap and aggregate both die with the process, so a
+crash leaves nothing behind in Audio MIDI Setup.
+
+Four things that already cost time:
+
+1. **The microphone cannot be a sub-device of that aggregate.** It was the first
+   design — Core Audio would have delivered both sources sample-synced in one
+   callback. Measured instead: output-only gives 129 callbacks in 2 s with
+   signal; adding the input device gives 0–3 callbacks and pure zeros, with
+   `create` and `start` both returning `noErr`. Silent failure. Independent of
+   `mainSubDevice`, of drift compensation, and of whether the process is a signed
+   bundle with granted microphone access. The mic is therefore recorded
+   separately with `AVAudioRecorder` and merged with ffmpeg at stop. Don't
+   "simplify" it back.
+2. **The IOProc block must be built in a `nonisolated` context.** Created inside
+   a `@MainActor` method it inherits MainActor isolation, and Swift 6 kills the
+   process with SIGTRAP (`_dispatch_assert_queue_fail` →
+   `swift_task_checkIsolatedSwift`) the moment Core Audio calls it on the audio
+   thread. `Recorder.makeIOProc` exists only for this.
+3. **`amix` needs `normalize=0`.** Default amix divides each input by the number
+   of inputs, so a meeting where only one party talks at a time comes out 6 dB
+   low.
+4. **`Window`, not `WindowGroup`.** `openWindow(id:)` against a WindowGroup opens
+   a *new* window per recording instead of raising the existing one.
+
+`mixDown` averages channels within a source and sums across sources, then clips.
+It runs on the real-time thread, which is why it takes an `AudioBufferList`
+rather than arrays. `--selfcheck` covers it.
+
 ## Output format is a byte-exact port
 
 `writeOutputs` in `Segment.swift` reimplements the backend's `write_outputs`

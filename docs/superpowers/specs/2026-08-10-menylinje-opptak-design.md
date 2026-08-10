@@ -39,17 +39,59 @@ videostrøm for å ta opp ren lyd.
 eksisterende filer.
 
 ```
-CATap (global, stereo) ─┐
-                        ├─→ privat aggregat-enhet ─→ IOProc ─→ mixDown() ─→ AVAudioFile
-mikrofon (sub-enhet) ───┘         (default-utgang                            (mono AAC)
-                                   som klokke)
+CATap (global, stereo) ─→ privat aggregat-enhet ─→ IOProc ─→ mixDown() ─→ system.m4a ─┐
+                              (default-utgang                                          ├─→ ffmpeg amix ─→ Opptak-….m4a
+                               som klokke)                                             │
+mikrofon ─→ AVAudioRecorder ─────────────────────────────────────────────→ mic.m4a ────┘
 ```
 
-Mikrofonen legges inn som sub-enhet i *samme* aggregat, med
-`kAudioSubDeviceDriftCompensationKey`. Da leverer Core Audio begge kildene
-sample-synkront i samme IOProc-callback, som separate buffere i én
-`AudioBufferList`. Miksing blir da ren aritmetikk — ingen ring-buffere, ingen
-tidsstempel-fletting, ingen ffmpeg-etterbehandling.
+> **Rettet under implementasjon.** Designet under var opprinnelig å legge
+> mikrofonen inn som sub-enhet i *samme* aggregat. Det virker ikke — se
+> «Mikrofonen kan ikke ligge i aggregatet» lenger ned. Diagrammet over viser den
+> løsningen som faktisk står i koden.
+
+Mikrofonen tas opp for seg med `AVAudioRecorder`, og de to filene mikses med
+ffmpeg ved stopp:
+
+```
+ffmpeg -y -i system.m4a -i mic.m4a \
+  -filter_complex "[0:a][1:a]amix=inputs=2:duration=longest:normalize=0" \
+  -ac 1 -c:a aac -b:a 128k Opptak-....m4a
+```
+
+`normalize=0` er ikke pynt: amix halverer som standard hver kilde etter antall
+input, så et opptak der bare én part snakker av gangen ville blitt 6 dB for lavt.
+ffmpeg er allerede et krav for backend, så dette koster ingen ny avhengighet.
+
+### Mikrofonen kan ikke ligge i aggregatet
+
+Målt, ikke antatt. Aggregat med bare utgangsenheten, to sekunder med lyd
+spillende:
+
+```
+bare utgang (referanse)   create=0 start=0 bufs=[2]    calls= 129 peaks=[0.3589]
+utgang+mik, main=utgang   create=0 start=0 bufs=[1, 2] calls=   3 peaks=[0.0000, 0.0000]
+utgang+mik, main=mik      create=0 start=0 bufs=[1, 2] calls=   0 peaks=[0.0000, 0.0000]
+utgang+mik, ingen main    create=0 start=0 bufs=[1, 2] calls=   0 peaks=[0.0000, 0.0000]
+utgang+mik, uten drift    create=0 start=0 bufs=[1, 2] calls=   0 peaks=[0.0000, 0.0000]
+bare mik                  create=0 start=0 bufs=[1, 2] calls=   0 peaks=[0.0000, 0.0000]
+```
+
+Kanallayouten ble altså akkurat som planlagt — `bufs=[1, 2]`, mikrofon mono og
+tap stereo som separate buffere — men strømmen står stille. `create` og `start`
+returnerer begge `noErr`; feilen er stum.
+
+Gjentatt fra en ad-hoc signert `.app` med `NSMicrophoneUsageDescription` og
+innvilget mikrofontilgang, for å utelukke at det var en TCC-effekt av å kjøre et
+løst `swift`-skript:
+
+```
+mikrofontilgang: true
+uten mikrofon: calls=175 peaks=[0.3589, ...]
+med mikrofon : calls=3   peaks=[0.0000, ...]
+```
+
+Samme resultat. Reserveløsningen i «Risiko» ble derfor tatt.
 
 ### `Recorder`
 
@@ -61,27 +103,29 @@ tidsstempel-fletting, ingen ffmpeg-etterbehandling.
 | `elapsed` | `@Published TimeInterval` | teller i menytittelen, oppdateres hvert sekund |
 | `lastRecording` | `@Published URL?` | signalet `ContentView` lytter på |
 | `errorMessage` | `@Published String?` | vises i menyen, tømmes ved neste `start()` |
-| `start()` | | rigger tap, aggregat, IOProc, fil |
-| `stop()` | | river ned i motsatt rekkefølge, publiserer `lastRecording` |
+| `start()` | | ber om mikrofontilgang, rigger tap, aggregat, IOProc, filer |
+| `stop()` | | river ned i motsatt rekkefølge, mikser, publiserer `lastRecording` |
 
 Tilstanden som ikke skal ut i UI-et — `tapID`, `aggregateID`, `procID`,
 `AVAudioFile` — er private felt.
 
 ### Oppstartssekvens i `start()`
 
-1. Finn default utgangsenhet og dens UID (aggregatet trenger en klokkekilde).
-2. Finn default inngangsenhet og dens UID. Feiler dette, fortsett uten mikrofon.
+1. `AVCaptureDevice.requestAccess(for: .audio)`. Nektet gir systemlyd alene.
+2. Finn default utgangsenhet og dens UID (aggregatet trenger en klokkekilde).
 3. `CATapDescription(stereoGlobalTapButExcludeProcesses: [])`, `isPrivate = true`,
    egen `uuid`.
 4. `AudioHardwareCreateProcessTap`.
-5. `AudioHardwareCreateAggregateDevice` med utgangsenheten og mikrofonen i
+5. `AudioHardwareCreateAggregateDevice` med utgangsenheten alene i
    `kAudioAggregateDeviceSubDeviceListKey`, og tappen i
    `kAudioAggregateDeviceTapListKey`. `kAudioAggregateDeviceIsPrivateKey = true`
    så enheten aldri dukker opp i Lydinnstillinger.
 6. Les `kAudioDevicePropertyStreamConfiguration` på aggregatet for å vite hvor
    mange buffere og kanaler callbacken kommer til å få.
-7. Opprett `AVAudioFile` i «Lagre i»-mappa.
+7. Opprett `AVAudioFile` på en temp-fil. Sluttnavnet i «Lagre i»-mappa reserveres
+   nå, men skrives først av miksesteget.
 8. `AudioDeviceCreateIOProcIDWithBlock` + `AudioDeviceStart`.
+9. `AVAudioRecorder` på mikrofonen, sist — feiler den, går systemlyden uansett.
 
 Hvert steg returnerer `OSStatus`. En liten `check(_ status: OSStatus, _ what: String) throws`
 kaster ved alt annet enn `noErr`. `start()` fanger, legger meldingen i
@@ -90,17 +134,19 @@ kaster ved alt annet enn `noErr`. `start()` fanger, legger meldingen i
 ### Miksing
 
 ```swift
-/// Summerer alle kanaler i alle buffere til ett mono-signal.
-/// Summering, ikke gjennomsnitt: gjennomsnitt ville halvert både mikrofon og
-/// systemlyd når begge er til stede, og gjort stille kilder utydelige.
-/// Klippes hardt til [-1, 1] — sum av to høye kilder kan gå over.
-func mixDown(_ buffers: [[Float]], frames: Int) -> [Float]
+func mixDown(_ list: UnsafeMutableAudioBufferListPointer,
+             into out: UnsafeMutablePointer<Float>,
+             capacity: Int) -> Int
 ```
 
-Ren funksjon, tar imot allerede utpakkede kanaler. `frames` er antallet callbacken
-ber om; er et buffer kortere, klippes lesingen til det korteste. Ulik lengde skal
-ikke kunne skje med driftskompensasjon på, men funksjonen skal ikke kunne lese
-utenfor.
+Kanalene *innenfor* én kilde snittes — vanlig stereo→mono-nedmiks. Kildene *seg
+imellom* summeres, og summen klippes til [-1, 1]. Etter at mikrofonen flyttet ut
+av aggregatet ser denne funksjonen som regel bare tappen, men logikken for flere
+kilder blir stående: den koster ingenting og er dekket av selfcheck.
+
+Funksjonen tar `AudioBufferList` direkte, ikke Swift-arrays, fordi den kjører på
+sanntidstråden og ikke får allokere. `capacity` er takhøyden i målbufferet; er en
+kilde kortere enn de andre, styrer den korteste. Returnerer antall frames skrevet.
 
 ### Skriving
 
@@ -128,7 +174,9 @@ ledig.
 
 `MenuBarExtra` i `SchousApp`, ved siden av `WindowGroup` og `Settings`:
 
-- Ikon: `waveform`, bytter til `record.circle.fill` i rødt under opptak.
+- Ikon: `waveform`, bytter til `record.circle.fill` under opptak. Menylinjen
+  tegner ikonet som template-bilde, så farge slår ikke gjennom — det er symbolet
+  selv som må bære tilstanden.
 - «Start opptak» / «Stopp opptak — 12:34».
 - «Åpne Schous».
 - `errorMessage` som deaktivert menyelement når den er satt.
@@ -152,6 +200,7 @@ talerantall og trykker «Start transkribering» selv. Ingen nytt UI, ingen endri
 | Situasjon | Oppførsel |
 |---|---|
 | Mikrofon nektet eller mangler | Ta opp systemlyd alene. Ingen feilmelding — det er et gyldig opptak. |
+| ffmpeg mangler eller feiler | Behold systemlyd-fila og velg den. Feilmelding i menyen — opptaket går aldri tapt. |
 | Tap eller aggregat feiler | `errorMessage` i menyen, rydd opp, `isRecording = false`. |
 | Kan ikke skrive til «Lagre i»-mappa | Feilmelding før opptaket starter, ikke etter. |
 | Utgangsenhet byttes underveis | Aggregatet mister klokka og stopper. Kjent begrensning, dokumenteres i README. |
@@ -194,8 +243,11 @@ resultatfila, og at den transkriberer.
 
 ## Risiko
 
-Det ene ubeviste punktet: at mikrofonen som sub-enhet i aggregatet dukker opp som
-eget buffer med forventet kanaltelling. Verifiseres først i implementasjonen, siden
-proben utløser mikrofon-prompt. Faller den, er reserveløsningen `AVAudioEngine` på
-mikrofonen separat og ffmpeg `amix=inputs=2:normalize=0` ved stopp — mer kode, men
-samme brukeropplevelse.
+Punktet som var ubevist da spec-en ble skrevet — mikrofonen som sub-enhet i
+aggregatet — falt. Reserveløsningen ble tatt, med `AVAudioRecorder` i stedet for
+`AVAudioEngine` fordi den skriver fila selv.
+
+Det som står igjen: mikrofonen og systemlyden starter noen millisekunder fra
+hverandre, og `amix` justerer ikke for det. For møtetranskribering er det uten
+betydning. Skulle det vise seg å ha noe å si, er neste steg å stemple begge
+strømmene med vertsklokka og legge inn forsinkelsen som `adelay`.

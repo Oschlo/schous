@@ -56,6 +56,25 @@ Deretter, i appen — åpne Innstillinger (⌘,) og fyll inn:
 
 Skriver `<navn>.txt`, `<navn>.srt` og `<navn>.json` til valgt mappe.
 
+## Opptak fra menylinjen
+
+Bølgeikonet i menylinjen tar opp **systemlyd og mikrofon samtidig** — alt du
+hører fra video, nettmøter og telefon, pluss din egen stemme.
+
+1. **Start opptak.** Ikonet blir en rød opptaksknapp, og menyen viser en teller.
+2. **Stopp opptak.** De to kildene mikses til én monofil,
+   `Opptak-2026-08-10-1432.m4a`, i samme mappe som er valgt under «Lagre i».
+3. Vinduet løftes med opptaket forhåndsvalgt. Derfra er det vanlig
+   transkribering — du velger selv om og når.
+
+Første gang spør macOS om mikrofontilgang. Sier du nei, tas systemlyden opp
+alene, som fortsatt er et brukbart opptak av et møte du bare lytter til.
+**Skjermopptak-tillatelse trengs ikke** — systemlyden hentes med en Core
+Audio-tapp, ikke med ScreenCaptureKit.
+
+Bytter du lydutgang midt i et opptak, mister aggregatet klokka og opptaket
+stopper. Sett enheten før du starter.
+
 En fil kan også forhåndsvelges ved oppstart, som er praktisk for testing:
 
 ```zsh

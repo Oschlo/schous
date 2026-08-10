@@ -27,6 +27,8 @@ struct ContentView: View {
             }
         }
         .frame(minWidth: 620, minHeight: 460)
+        // Et ferdig menylinje-opptak forhåndsvelges, klart til å transkriberes.
+        .onReceive(Recorder.shared.$lastRecording.compactMap { $0 }) { input = $0 }
     }
 
     // MARK: - Oppsett + kjøring

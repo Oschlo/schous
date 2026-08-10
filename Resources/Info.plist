@@ -19,7 +19,9 @@
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
-	<string>14.0</string>
+	<string>14.2</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Schous tar opp mikrofonen sammen med systemlyden når du starter et opptak fra menylinjen.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
