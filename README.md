@@ -58,10 +58,10 @@ Skriver `<navn>.txt`, `<navn>.srt` og `<navn>.json` til valgt mappe.
 
 ## Opptak fra menylinjen
 
-Bølgeikonet i menylinjen tar opp **systemlyd og mikrofon samtidig** — alt du
+Mikrofonikonet i menylinjen tar opp **systemlyd og mikrofon samtidig** — alt du
 hører fra video, nettmøter og telefon, pluss din egen stemme.
 
-1. **Start opptak.** Ikonet blir en rød opptaksknapp, og menyen viser en teller.
+1. **Start opptak.** Ikonet blir en opptaksring, og menyen viser en teller.
 2. **Stopp opptak.** De to kildene mikses til én monofil,
    `Opptak-2026-08-10-1432.m4a`, i samme mappe som er valgt under «Lagre i».
 3. Vinduet løftes med opptaket forhåndsvalgt. Derfra er det vanlig

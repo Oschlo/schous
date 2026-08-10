@@ -36,16 +36,17 @@ struct SchousApp: App {
 }
 
 private extension NSImage {
-    /// Appikonet i menylinje-størrelse. 16 pt er valgt fordi .icns-en har en
-    /// representasjon på akkurat 16 og 32 px (se icon.py), så pikselkunsten
-    /// skaleres med heltall og forblir skarp i stedet for å bli interpolert.
+    /// Mikrofonen fra appikonet som silhuett — samme rutenett i icon.py, uten
+    /// flisen bak. Menylinja er laget for template-bilder og farger dem selv
+    /// etter lys/mørk meny; hele appikonet krympet til 16 pt ble bare en klatt.
     @MainActor static let menuBar: NSImage = {
-        let icon = NSApplication.shared.applicationIconImage ?? NSImage()
-        let sized = icon.copy() as? NSImage ?? icon
-        sized.size = NSSize(width: 16, height: 16)
-        // Ikonet er i farger med vilje; template-rendering ville gjort det til en klatt.
-        sized.isTemplate = false
-        return sized
+        // swift build kjører uten .app-bundle og har ingen ressurser å laste.
+        guard let icon = Bundle.main.image(forResource: "MenuBarIcon") else {
+            return NSImage(systemSymbolName: "waveform", accessibilityDescription: "Schous") ?? NSImage()
+        }
+        icon.size = NSSize(width: 16, height: 16)
+        icon.isTemplate = true
+        return icon
     }()
 }
 

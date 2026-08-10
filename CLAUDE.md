@@ -115,6 +115,12 @@ Four things that already cost time:
 4. **`Window`, not `WindowGroup`.** `openWindow(id:)` against a WindowGroup opens
    a *new* window per recording instead of raising the existing one.
 
+The menu bar icon is `Resources/MenuBarIcon.png` — the same 16x16 sprite as the
+app icon, minus the background tile, emitted by `icon.py` alongside the `.icns`.
+It is loaded as a **template** image so the menu bar tints it for light/dark.
+`bundle.sh` must copy it; `swift build` alone has no bundle to load it from and
+falls back to an SF Symbol. Edit the sprite in `icon.py` and both icons rebuild.
+
 `mixDown` averages channels within a source and sums across sources, then clips.
 It runs on the real-time thread, which is why it takes an `AudioBufferList`
 rather than arrays. `--selfcheck` covers it.

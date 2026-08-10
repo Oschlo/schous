@@ -18,6 +18,7 @@ cp Resources/Info.plist "$APP/Contents/Info.plist"
 # og ikke en binærblob i git.
 /usr/bin/python3 icon.py >/dev/null
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+cp Resources/MenuBarIcon.png "$APP/Contents/Resources/MenuBarIcon.png"
 
 # ponytail: ad-hoc signering. Notarisering når appen faktisk skal distribueres.
 codesign --force --sign - "$APP"

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Genererer Resources/AppIcon.icns fra et 16x16 pikselrutenett.
+"""Genererer Resources/AppIcon.icns og Resources/MenuBarIcon.png fra ett rutenett.
 
 8-bits mikrofon i gammeldags stil. Kilden er rutenettet under — rediger det,
-kjør `python3 icon.py`, og alle ikonstørrelsene bygges på nytt.
+kjør `python3 icon.py`, og både appikonet og menylinje-ikonet bygges på nytt.
 
 16x16 er valgt fordi hver .icns-størrelse da blir et heltallsmultiplum
 (16, 32, 64, 128, 256, 512, 1024), så nærmeste-nabo-skalering gir skarpe
@@ -61,6 +61,17 @@ def base_pixels():
     return out
 
 
+def silhouette_pixels():
+    """Samme mikrofon som ren silhuett, uten flisen bak.
+
+    Menylinja tegner template-bilder ut fra alfakanalen alene og farger dem selv
+    etter lys/mørk meny, så RGB-verdiene her spiller ingen rolle — bare hvilke
+    piksler som er dekkende.
+    """
+    return [(0, 0, 0, 255) if ch != "." else (0, 0, 0, 0)
+            for row in SPRITE for ch in row]
+
+
 def write_png(path, pixels, size, scale):
     """Nærmeste nabo-skalering + minimal PNG-skriver (ingen avhengigheter)."""
     rows = []
@@ -101,11 +112,18 @@ def main():
         assert size % N == 0, f"{size} er ikke et multiplum av {N}"
         write_png(os.path.join(iconset, name + ".png"), pixels, size, size // N)
 
-    out = os.path.join(here, "Resources", "AppIcon.icns")
-    os.makedirs(os.path.dirname(out), exist_ok=True)
+    res = os.path.join(here, "Resources")
+    out = os.path.join(res, "AppIcon.icns")
+    os.makedirs(res, exist_ok=True)
     subprocess.run(["iconutil", "-c", "icns", iconset, "-o", out], check=True)
     shutil.rmtree(iconset, ignore_errors=True)
-    print(f"ok: {os.path.relpath(out, here)}")
+
+    # 32 px for et bilde som vises på 16 pt, altså @2x. Appen setter størrelsen;
+    # på ikke-retina halveres det med heltall og forblir skarpt.
+    menubar = os.path.join(res, "MenuBarIcon.png")
+    write_png(menubar, silhouette_pixels(), 32, 2)
+
+    print(f"ok: {os.path.relpath(out, here)}, {os.path.relpath(menubar, here)}")
 
 
 if __name__ == "__main__":
