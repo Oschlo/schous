@@ -18,7 +18,21 @@ under utvikling; `bundle.sh` lager .app-bundlen som trengs for Dock-ikon og vind
 
 ## Oppsett
 
-Åpne Innstillinger (⌘,) og fyll inn:
+Appen gjør ikke transkriberingen selv — den driver
+[mac-local-transcribe-with-diarization](https://github.com/Oschlo/mac-local-transcribe-with-diarization)
+som subprosess. Den må være installert og virke fra terminal først:
+
+```zsh
+git clone https://github.com/Oschlo/mac-local-transcribe-with-diarization.git
+cd mac-local-transcribe-with-diarization
+uv venv --python 3.12 .venv
+uv pip install --python .venv/bin/python -r requirements.txt
+```
+
+Du må også godta lisensene for `pyannote/speaker-diarization-community-1` og
+`pyannote/segmentation-3.0` på Hugging Face med samme konto som tokenet tilhører.
+
+Deretter, i appen — åpne Innstillinger (⌘,) og fyll inn:
 
 - **Backend** — mappen der `transcribe.py` og `.venv/` ligger. «Test» kjører
   `transcribe.py --selfcheck` og bekrefter at venv-et fungerer.
@@ -37,6 +51,15 @@ under utvikling; `bundle.sh` lager .app-bundlen som trengs for Dock-ikon og vind
 5. Når den er ferdig: gi talerne navn, slå sammen ID-er som er samme person, og **Lagre**.
 
 Skriver `<navn>.txt`, `<navn>.srt` og `<navn>.json` til valgt mappe.
+
+En fil kan også forhåndsvelges ved oppstart, som er praktisk for testing:
+
+```zsh
+open MacTranscribe.app --args --input ~/Filmer/opptak.mp4
+```
+
+`open` sender bare argumenter til en *fersk* oppstart — er appen allerede i gang,
+blir den bare aktivert og `--input` ignorert.
 
 ## Hvordan det henger sammen
 

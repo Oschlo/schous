@@ -2,3 +2,11 @@
 MacTranscribe.app/
 .DS_Store
 .swiftpm/
+
+# aldri media eller transkripsjoner
+*.wav
+*.mp4
+*.m4a
+*.aiff
+*.srt
+
