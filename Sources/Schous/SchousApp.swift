@@ -26,11 +26,27 @@ struct SchousApp: App {
         MenuBarExtra {
             MenuBarContent(recorder: recorder)
         } label: {
-            // Menylinjen tegner ikonet som template-bilde, så farge slår ikke gjennom —
-            // det er symbolet selv som må skille opptak fra ikke-opptak.
-            Image(systemName: recorder.isRecording ? "record.circle.fill" : "waveform")
+            if recorder.isRecording {
+                Image(systemName: "record.circle.fill")
+            } else {
+                Image(nsImage: .menuBar)
+            }
         }
     }
+}
+
+private extension NSImage {
+    /// Appikonet i menylinje-størrelse. 16 pt er valgt fordi .icns-en har en
+    /// representasjon på akkurat 16 og 32 px (se icon.py), så pikselkunsten
+    /// skaleres med heltall og forblir skarp i stedet for å bli interpolert.
+    @MainActor static let menuBar: NSImage = {
+        let icon = NSApplication.shared.applicationIconImage ?? NSImage()
+        let sized = icon.copy() as? NSImage ?? icon
+        sized.size = NSSize(width: 16, height: 16)
+        // Ikonet er i farger med vilje; template-rendering ville gjort det til en klatt.
+        sized.isTemplate = false
+        return sized
+    }()
 }
 
 private struct MenuBarContent: View {
