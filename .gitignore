@@ -14,3 +14,6 @@ Schous.app/
 # ikon genereres av icon.py
 Resources/AppIcon.icns
 __pycache__/
+
+# menylinje-ikonet genereres av icon.py
+Resources/MenuBarIcon.png

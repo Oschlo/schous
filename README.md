@@ -3,8 +3,9 @@
 Minimal native macOS-frontend for
 [mac-local-transcribe-with-diarization](https://github.com/Oschlo/mac-local-transcribe-with-diarization).
 
-Dra inn en fil, velg hvor resultatet skal ligge, følg fremdriften, og gi talerne navn
-etterpå. SwiftUI, ingen tredjepartsavhengigheter, ingen Xcode.
+Dra inn en fil — eller ta opp systemlyden direkte fra menylinja — velg hvor
+resultatet skal ligge, følg fremdriften, og gi talerne navn etterpå. SwiftUI,
+ingen tredjepartsavhengigheter, ingen Xcode.
 
 Navnet kommer fra Schous plass på Grünerløkka. Siden det ikke røper hva appen gjør,
 setter `bundle.sh` Spotlight-søkeord på bundlen — søk på «transkribering» eller
@@ -72,8 +73,8 @@ alene, som fortsatt er et brukbart opptak av et møte du bare lytter til.
 **Skjermopptak-tillatelse trengs ikke** — systemlyden hentes med en Core
 Audio-tapp, ikke med ScreenCaptureKit.
 
-Bytter du lydutgang midt i et opptak, mister aggregatet klokka og opptaket
-stopper. Sett enheten før du starter.
+Du kan bytte lydutgang midt i et opptak — tappen henter lyden fra prosessene,
+ikke fra enheten, så opptaket går uforstyrret videre.
 
 En fil kan også forhåndsvelges ved oppstart, som er praktisk for testing:
 

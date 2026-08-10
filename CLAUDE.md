@@ -93,6 +93,11 @@ aggregate device whose only sub-device is the default output (it is there as a
 clock) → an IOProc. Private tap and aggregate both die with the process, so a
 crash leaves nothing behind in Audio MIDI Setup.
 
+Changing the default output device mid-recording is harmless — measured at
+338/376/375 callbacks with identical peak before the switch, after it, and after
+switching back. The tap captures process output, not a device; the output device
+is only the clock. Don't add device-change handling for a problem that isn't.
+
 Four things that already cost time:
 
 1. **The microphone cannot be a sub-device of that aggregate.** It was the first
@@ -172,5 +177,10 @@ limitation, not a UI nicety. `root()` follows merge chains with a hop limit;
 
 - Don't print secrets. Presence checks use `[ -n "$TOKEN" ]` and `${#TOKEN}` —
   `${TOKEN:-fallback}` expands to the **value** when set and leaks it.
-- Don't commit media or transcripts. Only `.build/` and `Schous.app/` are
-  ignored; a stray `.wav` would go straight in.
+- Don't commit media or transcripts. `.gitignore` covers `*.wav`, `*.mp4`,
+  `*.m4a`, `*.aiff` and `*.srt` — but that list is not the same as "safe". A
+  recording saved as `.caf` or `.mov` would go straight in, so check
+  `git status` after any test that records or transcribes.
+- Don't commit generated icons. `Resources/AppIcon.icns` and
+  `Resources/MenuBarIcon.png` are both built by `icon.py` and both gitignored.
+  The sprite in `icon.py` is the source of truth.

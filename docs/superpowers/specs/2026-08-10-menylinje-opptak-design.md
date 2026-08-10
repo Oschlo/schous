@@ -174,9 +174,9 @@ ledig.
 
 `MenuBarExtra` i `SchousApp`, ved siden av `WindowGroup` og `Settings`:
 
-- Ikon: `waveform`, bytter til `record.circle.fill` under opptak. Menylinjen
-  tegner ikonet som template-bilde, så farge slår ikke gjennom — det er symbolet
-  selv som må bære tilstanden.
+- Ikon: mikrofon-silhuetten fra appikonet, bytter til `record.circle.fill` under
+  opptak. Menylinjen tegner ikonet som template-bilde og farger det selv etter
+  lys/mørk meny, så det er formen, ikke fargen, som bærer tilstanden.
 - «Start opptak» / «Stopp opptak — 12:34».
 - «Åpne Schous».
 - `errorMessage` som deaktivert menyelement når den er satt.
@@ -203,19 +203,31 @@ talerantall og trykker «Start transkribering» selv. Ingen nytt UI, ingen endri
 | ffmpeg mangler eller feiler | Behold systemlyd-fila og velg den. Feilmelding i menyen — opptaket går aldri tapt. |
 | Tap eller aggregat feiler | `errorMessage` i menyen, rydd opp, `isRecording = false`. |
 | Kan ikke skrive til «Lagre i»-mappa | Feilmelding før opptaket starter, ikke etter. |
-| Utgangsenhet byttes underveis | Aggregatet mister klokka og stopper. Kjent begrensning, dokumenteres i README. |
+| Utgangsenhet byttes underveis | Opptaket går videre. Målt: 338/376/375 callbacks og identisk peak før byttet, etter byttet og etter byttet tilbake. Tappen er global og uavhengig av hvilken enhet som er default; utgangsenheten er bare klokkekilde. |
 | Appen avsluttes under opptak | Tap og aggregat er private og dør med prosessen. Filen blir stående med det som rakk å bli skrevet. |
 
 ## Endringer i eksisterende filer
 
-- `Sources/Schous/SchousApp.swift` — `MenuBarExtra`, `id: "main"` på `WindowGroup`.
+- `Sources/Schous/SchousApp.swift` — `MenuBarExtra`, og `Window(id: "main")` i
+  stedet for `WindowGroup`: `openWindow(id:)` mot en WindowGroup åpner et nytt
+  vindu per opptak i stedet for å løfte det som finnes.
 - `Sources/Schous/ContentView.swift` — `.onReceive` som setter `input`.
 - `Sources/Schous/Selfcheck.swift` — assertions for `mixDown` og filnavn-generering.
 - `Resources/Info.plist` — `NSMicrophoneUsageDescription`,
   `LSMinimumSystemVersion` 14.0 → 14.2.
-- `Package.swift` — `.macOS(.v14)` står; taps krever 14.2, som SwiftPM ikke kan
-  uttrykke finere. Info.plist er den bindende grensa.
+- `Package.swift` — `.macOS("14.2")`. Strengformen finnes, så minstekravet kan
+  uttrykkes presist; `.v14` ville sluppet gjennom kall som ikke finnes før 14.2.
+- `icon.py` og `bundle.sh` — menylinje-ikonet, se under.
 - `README.md` og `CLAUDE.md` — bruk og fallgruver.
+
+### Menylinje-ikonet
+
+Samme 16x16-sprite som appikonet, uten flisen bak, skrevet av `icon.py` som
+`Resources/MenuBarIcon.png` (32 px = @2x for 16 pt) og lastet som template-bilde.
+Hele appikonet krympet til menylinje-størrelse ble uleselig — flisen tok plassen.
+PNG-en er et byggeartefakt på linje med `.icns` og er gitignorert; `bundle.sh`
+kopierer den inn. `swift build` alene har ingen bundle å laste fra og faller
+tilbake på et SF-symbol.
 
 ## Testing
 
@@ -227,9 +239,14 @@ talerantall og trykker «Start transkribering» selv. Ingen nytt UI, ingen endri
 - Ulik bufferlengde → korteste vinner, ingen lesing utenfor.
 - Filnavn-kollisjon → `-2`.
 
-Manuell verifikasjon som ikke lar seg automatisere: ta opp et par minutter med
-video spillende og egen tale samtidig, bekreft at begge kildene er hørbare i
-resultatfila, og at den transkriberer.
+Manuell verifikasjon, utført på ekte maskinvare:
+
+- Opptak startet og stoppet fra menylinjen, fil skrevet til «Lagre i»-mappa som
+  mono 48 kHz AAC og forhåndsvalgt i vinduet.
+- Begge kildene bekreftet i miksen: et vindu der ingen systemlyd spilte målte
+  `max_volume: -17.5 dB`, altså mikrofonen alene.
+- Bytte av utgangsenhet midt i opptak påvirker ikke opptaket (se feiltabellen).
+- Ett vindu etter gjentatte opptak, ikke ett per opptak.
 
 ## Utenfor omfang
 
