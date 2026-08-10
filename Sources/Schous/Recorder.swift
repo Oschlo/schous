@@ -208,10 +208,17 @@ final class Recorder: ObservableObject {
             process.standardOutput = FileHandle.nullDevice
             process.standardError = FileHandle.nullDevice
             process.terminationHandler = { finished in
-                for url in [system, microphone] { try? FileManager.default.removeItem(at: url) }
-                continuation.resume(returning: finished.terminationStatus == 0
-                    ? .success(destination)
-                    : .failure(RecorderError("ffmpeg avsluttet med \(finished.terminationStatus)")))
+                if finished.terminationStatus == 0 {
+                    // Miksen er skrevet; råfilene er ikke lenger verdt noe.
+                    for url in [system, microphone] { try? FileManager.default.removeItem(at: url) }
+                    continuation.resume(returning: .success(destination))
+                } else {
+                    // Miksingen feilet: behold systemlyden — stop() peker brukeren
+                    // dit framfor å miste opptaket. Bare mikrofon-scratchen ryddes.
+                    try? FileManager.default.removeItem(at: microphone)
+                    continuation.resume(returning:
+                        .failure(RecorderError("ffmpeg avsluttet med \(finished.terminationStatus)")))
+                }
             }
             do { try process.run() } catch {
                 continuation.resume(returning: .failure(RecorderError("fant ikke ffmpeg")))
@@ -278,6 +285,13 @@ private final class Sink: @unchecked Sendable {
 /// Kanalene *innenfor* én kilde snittes — det er en vanlig stereo→mono-nedmiks.
 /// Kildene *seg imellom* summeres: et snitt der ville halvert både mikrofon og
 /// systemlyd så snart begge er til stede. Summen klippes til [-1, 1].
+///
+/// **Én buffer = én kilde.** Det holder bare fordi tappen leverer stereo
+/// *interleaved* (én buffer, to kanaler), så kanalsnittet skjer innenfor bufferet.
+/// Skulle Core Audio en dag levere tappen *non-interleaved* (to buffere à én
+/// kanal), ville de to kanalene bli lest som to kilder og summert i stedet for
+/// snittet — inntil 2x nivå. IOProc-callbacken sender bare tappen inn her (mikken
+/// tas opp for seg), så flerkilde-summingen er reservert `--selfcheck`.
 func mixDown(_ list: UnsafeMutableAudioBufferListPointer,
              into out: UnsafeMutablePointer<Float>,
              capacity: Int) -> Int {
