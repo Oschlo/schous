@@ -1,0 +1,88 @@
+# MacTranscribe
+
+Minimal native macOS-frontend for
+[mac-local-transcribe-with-diarization](https://github.com/Oschlo/mac-local-transcribe-with-diarization).
+
+Dra inn en fil, velg hvor resultatet skal ligge, følg fremdriften, og gi talerne navn
+etterpå. SwiftUI, ingen tredjepartsavhengigheter, ingen Xcode.
+
+## Bygge
+
+```zsh
+./bundle.sh          # → MacTranscribe.app
+open MacTranscribe.app
+```
+
+Krever bare Command Line Tools (`xcode-select --install`). `swift build` alene holder
+under utvikling; `bundle.sh` lager .app-bundlen som trengs for Dock-ikon og vindusfokus.
+
+## Oppsett
+
+Åpne Innstillinger (⌘,) og fyll inn:
+
+- **Backend** — mappen der `transcribe.py` og `.venv/` ligger. «Test» kjører
+  `transcribe.py --selfcheck` og bekrefter at venv-et fungerer.
+- **HF_TOKEN** — Hugging Face-token for pyannote-diarization. Lagres i Keychain.
+
+`ffmpeg` må være installert (`brew install ffmpeg`). Appen setter selv
+`PATH=/opt/homebrew/bin:...`, siden en app startet fra Finder ikke arver Homebrew-PATH.
+
+## Bruk
+
+1. Dra en lyd- eller videofil inn i vinduet, eller velg den.
+2. Velg output-mappe. Oppgi antall talere hvis du vet det (tomt = automatisk).
+3. **Start transkribering.** Fremdriften viser steg 1–4 og segmentteller under steg 4.
+4. **Pause** fryser prosessen (SIGSTOP) og holder modellene i minnet.
+   **Stopp** avbryter — se advarselen under.
+5. Når den er ferdig: gi talerne navn, slå sammen ID-er som er samme person, og **Lagre**.
+
+Skriver `<navn>.txt`, `<navn>.srt` og `<navn>.json` til valgt mappe.
+
+## Hvordan det henger sammen
+
+Appen kjører backend-en som subprosess med arbeidsmappe satt til en jobbmappe under
+`~/Library/Application Support/MacTranscribe/jobs/<hash av inputsti>/`. Backend skriver
+`work/` (mellomresultater) og `output/` (fasit med `SPEAKER_00`-labels) dit.
+
+Fasiten røres aldri av navngivingen — omdøping og sammenslåing leses fra `speakers.json`
+i jobbmappen og påføres først når filene skrives til din output-mappe. Du kan endre navn
+så mange ganger du vil uten å miste de opprinnelige labelene.
+
+Jobbmappen er nøklet på inputstien, så `work/`-cachen overlever selv om du bytter
+output-mappe. En avbrutt kjøring gjenopptas på steg 4 fordi lyduttrekk, diarization og
+språkdeteksjon allerede ligger cachet.
+
+## Begrensninger
+
+Disse kommer fra backend-en og er filed som issues der:
+
+- **Stopp under steg 4 mister alt transkribert arbeid.** Backend skriver ingenting før
+  den er ferdig ([#3](https://github.com/Oschlo/mac-local-transcribe-with-diarization/issues/3),
+  [#5](https://github.com/Oschlo/mac-local-transcribe-with-diarization/issues/5)).
+  Appen advarer før den dreper prosessen.
+- **Fremdrift oppdateres bare hvert 10. sekund under steg 4.** tqdm bruker
+  `mininterval=10` når stderr ikke er en terminal
+  ([#4](https://github.com/Oschlo/mac-local-transcribe-with-diarization/issues/4)).
+- **Steg 2 viser rå tekst.** pyannotes fremdriftsbar skriver til stdout og lar seg ikke
+  parse pålitelig — samme issue.
+- **ffmpeg-feil er lite informative** ([#6](https://github.com/Oschlo/mac-local-transcribe-with-diarization/issues/6)).
+- Ingen modell- eller språkvalg — backend eksponerer det ikke som flagg.
+- Én fil om gangen.
+
+Diarization deler av og til én person i flere `SPEAKER_xx`-ID-er. Det er derfor
+taler-editoren har «slå sammen» og ikke bare omdøping.
+
+## Egentest
+
+```zsh
+.build/debug/MacTranscribe --selfcheck
+```
+
+Kjører parserne mot ekte backend-output-linjer og sjekker tidsstempel- og SRT-format.
+Med en sti til en ferdig kjøring sammenlignes output byte for byte mot backend-ens egne
+filer:
+
+```zsh
+.build/debug/MacTranscribe --selfcheck \
+  ~/Library/Application\ Support/MacTranscribe/jobs/<hash>/output/<navn>
+```

@@ -1,0 +1,4 @@
+.build/
+MacTranscribe.app/
+.DS_Store
+.swiftpm/
