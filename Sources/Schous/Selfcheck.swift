@@ -1,6 +1,6 @@
 import Foundation
 
-/// `MacTranscribe --selfcheck` — verifiserer at parserne matcher ekte backend-output.
+/// `Schous --selfcheck` — verifiserer at parserne matcher ekte backend-output.
 /// Linjene under er kopiert verbatim fra transcribe.py sine print/tqdm-kall.
 @MainActor
 func runSelfcheckAndExit() -> Never {
@@ -43,7 +43,7 @@ func runSelfcheckAndExit() -> Never {
 
     // Output-formatering mot backendens write_outputs
     let segs = [Segment(start: 4.216, end: 7.905, speaker: "SPEAKER_00", language: "sv", text: "Hei.")]
-    let dir = URL.temporaryDirectory.appending(path: "mactranscribe-selfcheck-\(getpid())")
+    let dir = URL.temporaryDirectory.appending(path: "schous-selfcheck-\(getpid())")
     try! FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: dir) }
     try! writeOutputs(segs, to: dir, base: "t", names: ["SPEAKER_00": "Hans Martin"])
@@ -55,7 +55,7 @@ func runSelfcheckAndExit() -> Never {
           "srt: \(srt.debugDescription)")
 
     // Valgfritt: sammenlign porten mot ekte backend-output.
-    // MacTranscribe --selfcheck <jobbmappe>/output/<base>
+    // Schous --selfcheck <jobbmappe>/output/<base>
     if let base = CommandLine.arguments.last, base != "--selfcheck" {
         verifyAgainstBackend(base: URL(fileURLWithPath: base))
     }
@@ -78,7 +78,7 @@ private func verifyAgainstBackend(base: URL) {
     catch { check(false, "kunne ikke dekode backend-JSON: \(error)"); return }
     check(!segs.isEmpty, "backend-JSON er tom")
 
-    let tmp = URL.temporaryDirectory.appending(path: "mactranscribe-verify-\(getpid())")
+    let tmp = URL.temporaryDirectory.appending(path: "schous-verify-\(getpid())")
     try! FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: tmp) }
     try! writeOutputs(segs, to: tmp, base: name)

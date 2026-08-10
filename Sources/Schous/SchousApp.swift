@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct MacTranscribeApp: App {
+struct SchousApp: App {
     init() {
         if CommandLine.arguments.contains("--selfcheck") { runSelfcheckAndExit() }
         // SwiftPM-binærer starter uten Dock-ikon/fokus; .app-bundlen trenger dette eksplisitt.
@@ -10,7 +10,7 @@ struct MacTranscribeApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("MacTranscribe") {
+        WindowGroup("Schous") {
             ContentView()
         }
         .windowResizability(.contentMinSize)

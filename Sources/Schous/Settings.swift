@@ -56,7 +56,7 @@ final class AppSettings: ObservableObject {
 }
 
 enum Keychain {
-    private static let service = "co.oschlo.mactranscribe"
+    private static let service = "co.oschlo.schous"
 
     static func get(_ account: String) -> String? {
         let q: [String: Any] = [

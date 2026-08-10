@@ -224,7 +224,7 @@ final class TranscriptionJob: ObservableObject {
         let digest = SHA256.hash(data: Data(input.path.utf8))
         let hash = digest.prefix(8).map { String(format: "%02x", $0) }.joined()
         return URL.applicationSupportDirectory
-            .appending(path: "MacTranscribe/jobs/\(hash)")
+            .appending(path: "Schous/jobs/\(hash)")
     }
 }
 

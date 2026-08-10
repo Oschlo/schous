@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>MacTranscribe</string>
+	<string>Schous</string>
 	<key>CFBundleDisplayName</key>
-	<string>MacTranscribe</string>
+	<string>Schous</string>
 	<key>CFBundleIdentifier</key>
-	<string>co.oschlo.mactranscribe</string>
+	<string>co.oschlo.schous</string>
 	<key>CFBundleExecutable</key>
-	<string>MacTranscribe</string>
+	<string>Schous</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

@@ -1,4 +1,4 @@
-# MacTranscribe
+# Schous
 
 Minimal native macOS-frontend for
 [mac-local-transcribe-with-diarization](https://github.com/Oschlo/mac-local-transcribe-with-diarization).
@@ -9,8 +9,8 @@ etterpå. SwiftUI, ingen tredjepartsavhengigheter, ingen Xcode.
 ## Bygge
 
 ```zsh
-./bundle.sh          # → MacTranscribe.app
-open MacTranscribe.app
+./bundle.sh          # → Schous.app
+open Schous.app
 ```
 
 Krever bare Command Line Tools (`xcode-select --install`). `swift build` alene holder
@@ -55,7 +55,7 @@ Skriver `<navn>.txt`, `<navn>.srt` og `<navn>.json` til valgt mappe.
 En fil kan også forhåndsvelges ved oppstart, som er praktisk for testing:
 
 ```zsh
-open MacTranscribe.app --args --input ~/Filmer/opptak.mp4
+open Schous.app --args --input ~/Filmer/opptak.mp4
 ```
 
 `open` sender bare argumenter til en *fersk* oppstart — er appen allerede i gang,
@@ -64,7 +64,7 @@ blir den bare aktivert og `--input` ignorert.
 ## Hvordan det henger sammen
 
 Appen kjører backend-en som subprosess med arbeidsmappe satt til en jobbmappe under
-`~/Library/Application Support/MacTranscribe/jobs/<hash av inputsti>/`. Backend skriver
+`~/Library/Application Support/Schous/jobs/<hash av inputsti>/`. Backend skriver
 `work/` (mellomresultater) og `output/` (fasit med `SPEAKER_00`-labels) dit.
 
 Fasiten røres aldri av navngivingen — omdøping og sammenslåing leses fra `speakers.json`
@@ -98,7 +98,7 @@ taler-editoren har «slå sammen» og ikke bare omdøping.
 ## Egentest
 
 ```zsh
-.build/debug/MacTranscribe --selfcheck
+.build/debug/Schous --selfcheck
 ```
 
 Kjører parserne mot ekte backend-output-linjer og sjekker tidsstempel- og SRT-format.
@@ -106,6 +106,6 @@ Med en sti til en ferdig kjøring sammenlignes output byte for byte mot backend-
 filer:
 
 ```zsh
-.build/debug/MacTranscribe --selfcheck \
-  ~/Library/Application\ Support/MacTranscribe/jobs/<hash>/output/<navn>
+.build/debug/Schous --selfcheck \
+  ~/Library/Application\ Support/Schous/jobs/<hash>/output/<navn>
 ```

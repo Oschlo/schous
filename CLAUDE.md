@@ -12,8 +12,8 @@ app looks the way it does.
 
 ```zsh
 swift build              # development
-./bundle.sh              # → MacTranscribe.app
-.build/debug/MacTranscribe --selfcheck
+./bundle.sh              # → Schous.app
+.build/debug/Schous --selfcheck
 ```
 
 **No Xcode project, on purpose.** This machine has only Command Line Tools, and
@@ -32,7 +32,7 @@ positional source path and `--speakers N`. There is no `--output`, `--model`,
   relative literals `"work"`/`"output"`, so `Process.currentDirectoryURL` *is*
   the output-path API. See `TranscriptionJob.jobDirectory(for:)`.
 - **Job dir is keyed on SHA-256 of the input path**, under
-  `~/Library/Application Support/MacTranscribe/jobs/<hash>/`. Two reasons: the
+  `~/Library/Application Support/Schous/jobs/<hash>/`. Two reasons: the
   `work/` cache survives the user changing output folder, and the pristine
   `SPEAKER_00`-labelled output stays as ground truth so renaming is always
   reversible. **Never write renamed output back into the job dir.**
@@ -41,7 +41,7 @@ positional source path and `--speakers N`. There is no `--output`, `--model`,
 - **`PATH` must be set explicitly.** `transcribe.py:31` calls `ffmpeg` with no
   path resolution, and an `.app` launched from Finder does not inherit
   `/opt/homebrew/bin`.
-- **`HF_TOKEN` comes from Keychain**, service `co.oschlo.mactranscribe`, account
+- **`HF_TOKEN` comes from Keychain**, service `co.oschlo.schous`, account
   `HF_TOKEN`. The app cannot read `~/.zshenv` — no shell environment from Finder.
   Note the backend only checks the token when `work/<base>.diar.json` is absent,
   so a cached job runs fine with a dead token. Test token changes on a fresh
@@ -99,8 +99,8 @@ caused a mismatch:
 against the backend's own files:
 
 ```zsh
-.build/debug/MacTranscribe --selfcheck \
-  ~/Library/Application\ Support/MacTranscribe/jobs/<hash>/output/<base>
+.build/debug/Schous --selfcheck \
+  ~/Library/Application\ Support/Schous/jobs/<hash>/output/<base>
 ```
 
 It also runs every parser against verbatim backend output lines. Run it after
@@ -116,9 +116,9 @@ limitation, not a UI nicety. `root()` follows merge chains with a hop limit;
 
 ## Testing gotchas
 
-- `open MacTranscribe.app --args …` only passes arguments on a **fresh** launch.
+- `open Schous.app --args …` only passes arguments on a **fresh** launch.
   If the app is already running, `open` just activates it and `--input` is
-  silently ignored. `pkill -x MacTranscribe` first.
+  silently ignored. `pkill -x Schous` first.
 - `defaults write` can race with `cfprefsd`. `killall cfprefsd` after writing if
   the app reads a stale value.
 - Driving the UI via System Events works, but setting a SwiftUI `TextField`'s
@@ -131,5 +131,5 @@ limitation, not a UI nicety. `root()` follows merge chains with a hop limit;
 
 - Don't print secrets. Presence checks use `[ -n "$TOKEN" ]` and `${#TOKEN}` —
   `${TOKEN:-fallback}` expands to the **value** when set and leaks it.
-- Don't commit media or transcripts. Only `.build/` and `MacTranscribe.app/` are
+- Don't commit media or transcripts. Only `.build/` and `Schous.app/` are
   ignored; a stray `.wav` would go straight in.

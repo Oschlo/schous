@@ -2,9 +2,9 @@
 import PackageDescription
 
 let package = Package(
-    name: "MacTranscribe",
+    name: "Schous",
     platforms: [.macOS(.v14)],
     targets: [
-        .executableTarget(name: "MacTranscribe", path: "Sources/MacTranscribe")
+        .executableTarget(name: "Schous", path: "Sources/Schous")
     ]
 )
