@@ -6,6 +6,10 @@ Minimal native macOS-frontend for
 Dra inn en fil, velg hvor resultatet skal ligge, følg fremdriften, og gi talerne navn
 etterpå. SwiftUI, ingen tredjepartsavhengigheter, ingen Xcode.
 
+Navnet kommer fra Schous plass på Grünerløkka. Siden det ikke røper hva appen gjør,
+setter `bundle.sh` Spotlight-søkeord på bundlen — søk på «transkribering» eller
+«transcribe» finner den.
+
 ## Bygge
 
 ```zsh
