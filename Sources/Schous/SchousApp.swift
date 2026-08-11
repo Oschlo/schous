@@ -16,6 +16,9 @@ struct SchousApp: App {
         // mot en WindowGroup lager et nytt vindu for hvert opptak i stedet for å løfte det.
         Window("Schous", id: "main") {
             ContentView()
+                // Window-scenen åpnes ved start, så dette er oppstartssjekken.
+                // Den er stille og spør GitHub høyst én gang i døgnet.
+                .task { await Updater.shared.checkIfDue() }
         }
         .windowResizability(.contentMinSize)
 
@@ -52,6 +55,7 @@ private extension NSImage {
 
 private struct MenuBarContent: View {
     @ObservedObject var recorder: Recorder
+    @ObservedObject private var updater = Updater.shared
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -69,6 +73,14 @@ private struct MenuBarContent: View {
         }
         Divider()
         Button("Åpne Schous") { showWindow() }
+        if let version = updater.available {
+            Button("Hent oppdatering — \(version)…") { updater.openReleasePage() }
+        } else {
+            Button("Se etter oppdateringer…") { Task { await updater.check() } }
+        }
+        if let status = updater.status {
+            Text(status)
+        }
         Divider()
         Button("Avslutt Schous") { NSApplication.shared.terminate(nil) }
     }

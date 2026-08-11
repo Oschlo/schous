@@ -11,6 +11,19 @@ Navnet kommer fra Schous plass på Grünerløkka. Siden det ikke røper hva appe
 setter `bundle.sh` Spotlight-søkeord på bundlen — søk på «transkribering» eller
 «transcribe» finner den.
 
+## Installere
+
+Last ned `Schous.zip` fra [Releases](https://github.com/Oschlo/schous/releases),
+pakk ut, og legg `Schous.app` i `/Applications`.
+
+Appen er signert med et lokalt sertifikat, ikke notarisert hos Apple. Laster du
+den ned i en nettleser, blir den satt i karantene og Gatekeeper nekter å åpne
+den — høyreklikk → Åpne én gang, eller `xattr -d com.apple.quarantine Schous.app`.
+
+Menylinja har **Se etter oppdateringer…**, og appen sjekker i tillegg stille én
+gang i døgnet ved oppstart. Finner den en nyere utgivelse, tilbyr menyen å åpne
+release-siden. Den installerer ikke selv; du bytter ut appen i /Applications.
+
 ## Bygge
 
 ```zsh
@@ -20,6 +33,9 @@ open Schous.app
 
 Krever bare Command Line Tools (`xcode-select --install`). `swift build` alene holder
 under utvikling; `bundle.sh` lager .app-bundlen som trengs for Dock-ikon og vindusfokus.
+
+`./release.sh 0.2.0` tagger, bygger, og laster opp en release. Den må kjøres på
+maskinen som har «Schous Dev»-signeringsidentiteten — se CLAUDE.md.
 
 ## Oppsett
 
@@ -67,6 +83,10 @@ hører fra video, nettmøter og telefon, pluss din egen stemme.
    `Opptak-2026-08-10-1432.m4a`, i samme mappe som er valgt under «Lagre i».
 3. Vinduet løftes med opptaket forhåndsvalgt. Derfra er det vanlig
    transkribering — du velger selv om og når.
+
+Menyen viser hvilken mikrofon opptaket treffer — «Mikrofon: `<navn>`» — så du
+ser det før du starter, ikke etterpå. Er tilgangen avslått, sier raden det, med
+veien til å fikse det.
 
 Første gang spør macOS om mikrofontilgang. Sier du nei, tas systemlyden opp
 alene, som fortsatt er et brukbart opptak av et møte du bare lytter til.
