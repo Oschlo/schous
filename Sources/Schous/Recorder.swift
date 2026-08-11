@@ -76,9 +76,15 @@ final class Recorder: ObservableObject {
             switch result {
             case .success(let url): lastRecording = url
             case .failure(let error):
-                // Systemlyden er allerede på disk — behold den framfor å miste opptaket.
-                errorMessage = "miksing feilet (\(error)) — systemlyden ligger i \(system.lastPathComponent)"
-                lastRecording = system
+                // Begge råfilene er beholdt — pek brukeren på systemlyden framfor
+                // å miste opptaket. `rescued` er der `merge` fikk berget den;
+                // slo bergingen også feil, ligger den fortsatt i temp.
+                let kept = error.rescued ?? system
+                let alsoMic = microphone == nil ? "" : "; mikrofonsporet er beholdt"
+                errorMessage = "miksing feilet (\(error)) — systemlyden ligger som "
+                    + "\(kept.lastPathComponent) i "
+                    + "\(kept.deletingLastPathComponent().lastPathComponent)\(alsoMic)"
+                lastRecording = kept
             }
         }
     }
@@ -190,7 +196,9 @@ final class Recorder: ObservableObject {
                 try FileManager.default.moveItem(at: system, to: destination)
                 return .success(destination)
             } catch {
-                return .failure(RecorderError(error.localizedDescription))
+                return .failure(RecorderError(
+                    error.localizedDescription,
+                    rescued: rescue(system: system, microphone: nil, into: destination)))
             }
         }
         return await withCheckedContinuation { continuation in
@@ -208,22 +216,79 @@ final class Recorder: ObservableObject {
             process.standardOutput = FileHandle.nullDevice
             process.standardError = FileHandle.nullDevice
             process.terminationHandler = { finished in
-                if finished.terminationStatus == 0 {
-                    // Miksen er skrevet; råfilene er ikke lenger verdt noe.
-                    for url in [system, microphone] { try? FileManager.default.removeItem(at: url) }
-                    continuation.resume(returning: .success(destination))
-                } else {
-                    // Miksingen feilet: behold systemlyden — stop() peker brukeren
-                    // dit framfor å miste opptaket. Bare mikrofon-scratchen ryddes.
-                    try? FileManager.default.removeItem(at: microphone)
-                    continuation.resume(returning:
-                        .failure(RecorderError("ffmpeg avsluttet med \(finished.terminationStatus)")))
+                let status = finished.terminationStatus
+                for url in Self.scratchToRemove(exit: status, system: system, microphone: microphone) {
+                    try? FileManager.default.removeItem(at: url)
                 }
+                guard status == 0 else {
+                    // env svarer 127 når det ikke finner kommandoen. Det er den ene
+                    // statusen vi kan oversette — og den vanligste her, siden ffmpeg
+                    // er en separat Homebrew-installasjon menylinjeopptak ikke krever.
+                    let why = status == 127
+                        ? "ffmpeg er ikke installert"
+                        : "ffmpeg avsluttet med \(status)"
+                    continuation.resume(returning: .failure(RecorderError(
+                        why,
+                        rescued: Self.rescue(system: system, microphone: microphone, into: destination))))
+                    return
+                }
+                continuation.resume(returning: .success(destination))
             }
             do { try process.run() } catch {
-                continuation.resume(returning: .failure(RecorderError("fant ikke ffmpeg")))
+                // Ikke «fant ikke ffmpeg»: executableURL er /usr/bin/env, som alltid
+                // finnes — mangler ffmpeg, får vi exit 127 over. Kaster run(), er det
+                // spawn som feilet (prosesstabell full, fd-tak, policy), og den ekte
+                // feilen er det eneste som kan skille dem.
+                continuation.resume(returning: .failure(RecorderError(
+                    "kunne ikke starte ffmpeg: \(error.localizedDescription)",
+                    rescued: Self.rescue(system: system, microphone: microphone, into: destination))))
             }
         }
+    }
+
+    /// Hvilke råfiler som skal slettes etter en miks — tom liste hvis den feilet.
+    ///
+    /// Egen ren funksjon fordi nettopp denne avgjørelsen er hele poenget med
+    /// feilhåndteringen: **ingen input slettes når miksingen feiler.** Inne i
+    /// Process-callbacken kan ingenting nå den, og `--selfcheck` fanger derfor
+    /// at noen fjerner regelen igjen.
+    nonisolated static func scratchToRemove(
+        exit status: Int32, system: URL, microphone: URL?
+    ) -> [URL] {
+        guard status == 0 else { return [] }
+        return [system, microphone].compactMap { $0 }
+    }
+
+    /// Berger råopptaket når miksingen feiler, og returnerer stien systemlyden endte på.
+    ///
+    /// Filene ligger i `URL.temporaryDirectory` — `/var/folders/…/T/`, som macOS
+    /// rydder på eget initiativ og som brukeren ikke finner fram til fra et
+    /// UUID-filnavn. De flyttes derfor ved siden av destinasjonen, i mappa
+    /// `outputURL()` allerede har sjekket at er skrivbar.
+    ///
+    /// Mikrofonsporet blir med. Det er brukerens egen stemme og finnes ingen
+    /// andre steder, og feilet miksingen på noe annet enn innholdet — ffmpeg
+    /// mangler, disken full — er en manuell kjøring fortsatt mulig med begge.
+    nonisolated static func rescue(
+        system: URL, microphone: URL?, into destination: URL
+    ) -> URL {
+        let fm = FileManager.default
+        // ffmpeg skriver med -y, så en miks som feilet etter at muxeren kom i gang
+        // ligger igjen på riktig navn i riktig mappe, i plausibel størrelse, og er
+        // uspillbar. Den ser ut som opptaket i Finder — og `recordingURL` teller
+        // den som navnekollisjon, så neste opptak blir «-2». Fjern den.
+        try? fm.removeItem(at: destination)
+
+        let dir = destination.deletingLastPathComponent()
+        let base = destination.deletingPathExtension().lastPathComponent
+        func salvage(_ url: URL, _ kind: String) -> URL? {
+            let target = dir.appending(path: "\(base)-\(kind).m4a")
+            try? fm.removeItem(at: target)
+            do { try fm.moveItem(at: url, to: target); return target } catch { return nil }
+        }
+        if let microphone { _ = salvage(microphone, "mikrofon") }
+        // Feiler flyttingen, ligger fila fortsatt i temp — ikke verre enn før.
+        return salvage(system, "systemlyd") ?? system
     }
 
     private func outputURL() throws -> URL {
@@ -283,15 +348,22 @@ private final class Sink: @unchecked Sendable {
 /// antall frames skrevet.
 ///
 /// Kanalene *innenfor* én kilde snittes — det er en vanlig stereo→mono-nedmiks.
-/// Kildene *seg imellom* summeres: et snitt der ville halvert både mikrofon og
-/// systemlyd så snart begge er til stede. Summen klippes til [-1, 1].
+/// Kildene *seg imellom* summeres: et snitt ville dempet hver kilde etter hvor
+/// mange andre som tilfeldigvis er til stede, og én kilde alene skal komme
+/// uendret ut. Summen klippes til [-1, 1].
 ///
-/// **Én buffer = én kilde.** Det holder bare fordi tappen leverer stereo
-/// *interleaved* (én buffer, to kanaler), så kanalsnittet skjer innenfor bufferet.
-/// Skulle Core Audio en dag levere tappen *non-interleaved* (to buffere à én
-/// kanal), ville de to kanalene bli lest som to kilder og summert i stedet for
-/// snittet — inntil 2x nivå. IOProc-callbacken sender bare tappen inn her (mikken
-/// tas opp for seg), så flerkilde-summingen er reservert `--selfcheck`.
+/// **Én buffer = én kilde.** Tappen leverer stereo *interleaved* — målt
+/// `bufs=[2]`, altså én buffer med to kanaler (menylinje-opptak-design.md,
+/// referanseraden) — så kanalsnittet skjer innenfor bufferet. Leverte Core Audio
+/// den *non-interleaved* (to buffere à én kanal), ville kanalene blitt lest som
+/// to kilder og summert i stedet for snittet: nøyaktig 2x nivå, hver frame,
+/// klipping på alt over 0.5.
+///
+/// Med dagens oppsett ser funksjonen som regel bare tappen — mikken tas opp for
+/// seg, og utgangsenheten i aggregatet er bare klokke. «Som regel», ikke
+/// «alltid»: er default-utgang en enhet med egne inngangsstrømmer (lydkort,
+/// BlackHole), kan `list` få flere buffere. Flerkilde-summingen står derfor, og
+/// `--selfcheck` dekker den.
 func mixDown(_ list: UnsafeMutableAudioBufferListPointer,
              into out: UnsafeMutablePointer<Float>,
              capacity: Int) -> Int {
@@ -336,7 +408,13 @@ func recordingURL(in dir: URL, at date: Date, exists: (URL) -> Bool) -> URL {
 
 struct RecorderError: Error, CustomStringConvertible {
     let description: String
-    init(_ description: String) { self.description = description }
+    /// Satt når en feilet miks fikk råopptaket berget til brukerens utmappe.
+    /// `stop()` peker `lastRecording` hit, så forhåndsvalget treffer en fil som finnes.
+    let rescued: URL?
+    init(_ description: String, rescued: URL? = nil) {
+        self.description = description
+        self.rescued = rescued
+    }
 }
 
 private func ck(_ status: OSStatus, _ what: String) throws {

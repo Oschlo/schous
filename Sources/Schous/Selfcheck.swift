@@ -113,6 +113,45 @@ private func recorderSelfcheck() {
     let ragged = mix([(1, [0.3, 0.3, 0.3]), (1, [0.2])])
     check(ragged ≈ [0.5], "korteste buffer styrer: \(ragged)")
 
+    // Rydding av råfiler etter miksing. Feiler miksingen, er scratchfilene det
+    // eneste som er igjen av opptaket — da slettes ingen av dem.
+    let sys = URL(fileURLWithPath: "/tmp/schous-system.m4a")
+    let mic = URL(fileURLWithPath: "/tmp/schous-mic.m4a")
+    check(Recorder.scratchToRemove(exit: 0, system: sys, microphone: mic) == [sys, mic],
+          "vellykket miks rydder begge råfilene")
+    check(Recorder.scratchToRemove(exit: 0, system: sys, microphone: nil) == [sys],
+          "uten mikrofon ryddes bare systemlyden")
+    // 127 = env fant ikke ffmpeg. Begge filene er intakte; ingen skal slettes.
+    check(Recorder.scratchToRemove(exit: 127, system: sys, microphone: mic).isEmpty,
+          "ffmpeg mangler: behold begge råfilene")
+    check(Recorder.scratchToRemove(exit: 1, system: sys, microphone: mic).isEmpty,
+          "feilet miks sletter ingen input")
+
+    // Bergingen, med ekte filer: den halvskrevne miksen skal bort, og begge
+    // råfilene skal ende i utmappa med navn brukeren kan finne igjen.
+    let fm = FileManager.default
+    let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appending(path: "schous-selfcheck-\(UUID().uuidString)")
+    try? fm.createDirectory(at: tmp, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(at: tmp) }
+
+    let rawSystem = tmp.appending(path: "schous-system-raa.m4a")
+    let rawMic = tmp.appending(path: "schous-mic-raa.m4a")
+    let dest = tmp.appending(path: "Opptak-2026-08-11-1432.m4a")
+    for (url, body) in [(rawSystem, "sys"), (rawMic, "mic"), (dest, "halvskrevet miks")] {
+        try? Data(body.utf8).write(to: url)
+    }
+
+    let kept = Recorder.rescue(system: rawSystem, microphone: rawMic, into: dest)
+    check(!fm.fileExists(atPath: dest.path), "halvskrevet miks fjernet")
+    check(kept == tmp.appending(path: "Opptak-2026-08-11-1432-systemlyd.m4a"),
+          "systemlyden berget til utmappa: \(kept.lastPathComponent)")
+    check((try? Data(contentsOf: kept)) == Data("sys".utf8), "berget fil har innholdet i behold")
+    check(fm.fileExists(atPath: tmp.appending(path: "Opptak-2026-08-11-1432-mikrofon.m4a").path),
+          "mikrofonsporet berget, ikke slettet")
+    check(!fm.fileExists(atPath: rawSystem.path) && !fm.fileExists(atPath: rawMic.path),
+          "råfilene flyttet ut av temp")
+
     // Navnekollisjon når to opptak stoppes innen samme minutt.
     let dir = URL(fileURLWithPath: "/tmp")
     let now = Date()
