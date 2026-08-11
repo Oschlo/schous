@@ -196,6 +196,26 @@ Changing the default output device mid-recording is harmless — measured at
 switching back. The tap captures process output, not a device; the output device
 is only the clock. Don't add device-change handling for a problem that isn't.
 
+**The two tracks are offset, and 21 ms is not worth fixing.** Because the mic
+starts first (item 2 below), the system track is missing the setup interval at its
+head, and `amix` aligns both files at zero — so system audio plays that much
+*earlier* than the mic. Reviewers keep raising it; measure before agreeing.
+Measured on macOS 26.6.1, six rounds of the exact `begin()` sequence:
+
+```
+Δ  min 19.6  median 21.0  maks 22.7 ms
+   opprett aggregat 10.8 · lag IOProc 6.5 · opprett tapp 2.8 · åpne fil 0.8
+   AudioDeviceStart og oppslag av utgangsenhet: under 0.05
+```
+
+That is an upper bound — `record()` returning is not the same instant the first
+sample lands, and any AudioQueue startup latency eats into it. 21 ms is under the
+precedence-effect threshold, it is less skew than two people sitting a chair apart
+in the same room, and the tracks are mixed to mono before whisper resamples to
+16 kHz anyway. Don't plumb `-itsoffset` through `merge` for it. The harness is
+~150 lines and trivial to rewrite if the ordering ever changes; what matters is
+that you re-measure rather than reason about it.
+
 Five things that already cost time:
 
 1. **The microphone cannot be a sub-device of that aggregate.** It was the first
