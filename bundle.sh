@@ -30,7 +30,12 @@ cp Resources/MenuBarIcon.png "$APP/Contents/Resources/MenuBarIcon.png"
 # H"…"`, som står stille for alltid. Se «Signering» i CLAUDE.md for oppsettet.
 #
 # ponytail: fortsatt lokalt selvsignert. Notarisering når appen skal distribueres.
-if security find-certificate -c "Schous Dev" >/dev/null 2>&1; then
+#
+# `find-identity`, ikke `find-certificate`: codesign trenger privatnøkkelen også,
+# og et sertifikat uten nøkkel ville passert sjekken, fått codesign til å feile og
+# `set -e` til å stoppe buildet med en usignert app — altså aldri nådd ad-hoc-
+# fallbacken under. Uten `-v`, som filtrerer bort alt som ikke er trust'et.
+if security find-identity -p codesigning | grep -q '"Schous Dev"'; then
   codesign --force --sign "Schous Dev" "$APP"
 else
   echo "advarsel: fant ikke «Schous Dev» — ad-hoc-signerer, og da må du godkjenne"
