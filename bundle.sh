@@ -35,12 +35,21 @@ cp Resources/MenuBarIcon.png "$APP/Contents/Resources/MenuBarIcon.png"
 # og et sertifikat uten nøkkel ville passert sjekken, fått codesign til å feile og
 # `set -e` til å stoppe buildet med en usignert app — altså aldri nådd ad-hoc-
 # fallbacken under. Uten `-v`, som filtrerer bort alt som ikke er trust'et.
+#
+# `--options runtime` hører med til den stabile signaturen, ikke ved siden av den.
+# Uten hardened runtime laster appen hva som helst via DYLD_INSERT_LIBRARIES, og
+# når signaturen over gjør TCC-granten permanent, blir det en permanent vei inn til
+# mikrofonen, systemlyden og HF_TOKEN. Hardened runtime stenger til gjengjeld
+# mikrofonen uansett hva TCC har sagt ja til, så den må entitles eksplisitt — se
+# Resources/Schous.entitlements. Library validation følger med på kjøpet, men alt
+# binæren lenker mot ligger i /usr/lib og /System (`otool -L`), så det koster null.
+SIGN=(--force --options runtime --entitlements Resources/Schous.entitlements)
 if security find-identity -p codesigning | grep -q '"Schous Dev"'; then
-  codesign --force --sign "Schous Dev" "$APP"
+  codesign "${SIGN[@]}" --sign "Schous Dev" "$APP"
 else
   echo "advarsel: fant ikke «Schous Dev» — ad-hoc-signerer, og da må du godkjenne"
   echo "         mikrofon, lydopptak og Keychain på nytt etter hver build."
-  codesign --force --sign - "$APP"
+  codesign "${SIGN[@]}" --sign - "$APP"
 fi
 
 # Spotlight finner apper på navn, og «Schous» sier ingenting om hva den gjør.
