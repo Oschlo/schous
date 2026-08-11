@@ -93,6 +93,25 @@ aggregate device whose only sub-device is the default output (it is there as a
 clock) → an IOProc. Private tap and aggregate both die with the process, so a
 crash leaves nothing behind in Audio MIDI Setup.
 
+**The tap needs `NSAudioCaptureUsageDescription` in `Info.plist`.** It is its own
+TCC service (`kTCCServiceAudioCapture`) — not the microphone one the app already
+asks for. Without the key the tap fails *silently and only inside the app
+bundle*: `AudioHardwareCreateProcessTap`, the aggregate, the IOProc and
+`AudioDeviceStart` all return `noErr`, callbacks arrive in step with playback,
+and every sample is zero. Measured on macOS 26.6.1, same tap code, only the
+`Info.plist` differing ([#2](https://github.com/Oschlo/schous/issues/2)):
+
+```
+uten nøkkelen    calls=862 bufs=[1] channels=[2] peak=0.0
+med nøkkelen     calls=849 bufs=[1] channels=[2] peak=0.198
+```
+
+That is why the early probes looked fine: run from Terminal, the tap inherits
+**Terminal's** audio-capture grant, and a loose `swiftc` binary gives signal even
+with no key anywhere. Any measurement of the tap has to be `open`ed as a bundle,
+never run from the shell, or it tests Terminal's permissions instead of the
+app's.
+
 Changing the default output device mid-recording is harmless — measured at
 338/376/375 callbacks with identical peak before the switch, after it, and after
 switching back. The tap captures process output, not a device; the output device

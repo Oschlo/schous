@@ -22,6 +22,10 @@
 	<string>14.2</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Schous tar opp mikrofonen sammen med systemlyden når du starter et opptak fra menylinjen.</string>
+	<!-- Uten denne nøkkelen leverer Core Audio-tappen digital stillhet: callbackene
+	     kommer, alle statusverdier er noErr, og hver sample er null. Se CLAUDE.md. -->
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Schous tar opp lyden fra møtet eller videoen du spiller av, slik at den kan transkriberes.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
