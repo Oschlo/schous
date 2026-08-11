@@ -23,6 +23,12 @@ final class Recorder: ObservableObject {
     @Published private(set) var errorMessage: String?
     /// Settes når et opptak er ferdig skrevet. ContentView lytter og forhåndsvelger fila.
     @Published var lastRecording: URL?
+    /// Navnet på mikrofonen menyen viser. Må være `@Published` og ikke et oppslag
+    /// i `body`: SwiftUI bygger menyinnholdet én gang og gjenbruker det, så uten
+    /// en publisert endring blir navnet stående på forrige enhet helt til noe
+    /// annet oppdaterer menyen. Målt: meny åpnet tre ganger uten at noe
+    /// publiserer gir én evaluering av `body`, ikke tre.
+    @Published private(set) var inputName: String? = defaultInputName()
 
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
@@ -33,7 +39,21 @@ final class Recorder: ObservableObject {
     private var ticker: Task<Void, Never>?
     private var heardSystemSound = false
 
-    private init() {}
+    private init() {
+        // Dette er *inndata*-velgeren, ikke utgangsenheten under opptak — den
+        // siste er dokumentert ufarlig og skal ikke overvåkes. Bytter brukeren
+        // mikrofon i Systeminnstillinger mens appen står stille, er denne
+        // lytteren det eneste som finnes til å oppdatere menyen.
+        var addr = address(kAudioHardwarePropertyDefaultInputDevice)
+        let registered = AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject), &addr, .main
+        ) { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.inputName = defaultInputName() }
+        }
+        // Uten lytteren fryser navnet på enheten som gjaldt ved oppstart, og en
+        // rad som stille slutter å stemme er verre enn ingen rad.
+        if registered != noErr { inputName = nil }
+    }
 
     func toggle() { isRecording ? stop() : start() }
 
@@ -44,6 +64,8 @@ final class Recorder: ObservableObject {
             // Første gang gir dette systemets mikrofon-prompt. Nektes den, tas
             // systemlyden opp alene — det er fortsatt et brukbart opptak.
             let microphone = await AVCaptureDevice.requestAccess(for: .audio)
+            // Svaret her er den ene tilstandsendringen HAL-lytteren ikke ser.
+            inputName = defaultInputName()
             do {
                 try begin(microphone: microphone)
                 isRecording = true
@@ -482,9 +504,18 @@ private func defaultDeviceUID(_ selector: AudioObjectPropertySelector) throws ->
 }
 
 /// Navnet på systemets standard-inndata — det `AVAudioRecorder` faktisk tar opp
-/// fra, siden macOS ikke lar oss peke på en enhet. Vises i menyen så brukeren
-/// ser hvilken mikrofon opptaket treffer *før* start. `nil` om ingen finnes.
+/// fra, siden `AVAudioRecorder` ikke har noe enhets-API på macOS (`AVAudioSession`
+/// er iOS-only). Det er biblioteket som mangler valget, ikke OS-et: `AVAudioEngine`
+/// eller `AVCaptureSession` *kan* peke på en enhet, men begge ville flyttet på
+/// mikrofon-før-tapp-rekkefølgen i `begin`, som er målt og ikke skal røres.
+///
+/// Vises i menyen så brukeren ser hvilken mikrofon opptaket treffer *før* start.
+/// `nil` om ingen finnes — eller om mikrofontilgang er nektet, for da blir det
+/// ikke noe mikrofonspor, og menyen skal ikke love et opptak som ikke skjer.
+/// Leser bare HAL-egenskaper, så kallet utløser ingen TCC-dialog av seg selv.
 func defaultInputName() -> String? {
+    let access = AVCaptureDevice.authorizationStatus(for: .audio)
+    guard access == .authorized || access == .notDetermined else { return nil }
     guard let deviceID = try? defaultDeviceID(kAudioHardwarePropertyDefaultInputDevice)
     else { return nil }
     var addr = address(kAudioObjectPropertyName)
