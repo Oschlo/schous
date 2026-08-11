@@ -31,6 +31,7 @@ final class Recorder: ObservableObject {
     private var mic: AVAudioRecorder?
     private var destination: URL?
     private var ticker: Task<Void, Never>?
+    private var heardSystemSound = false
 
     private init() {}
 
@@ -68,6 +69,12 @@ final class Recorder: ObservableObject {
         teardown()
         isRecording = false
         elapsed = 0
+        // Info.plist-nøkkelen utløser spørsmålet, men svaret kan bli nei — og da er
+        // tappen like taus som før nøkkelen fantes, uten en eneste feilkode.
+        if !heardSystemSound {
+            errorMessage = "systemlyden var helt stille — gi Schous tilgang under "
+                + "Personvern og sikkerhet → Lydopptak, ellers tas bare mikrofonen opp"
+        }
         guard let system, let destination else { return }
 
         // Miksingen kan ta noen sekunder på lange opptak; ikke blokker menyen.
@@ -153,7 +160,9 @@ final class Recorder: ObservableObject {
             }
             self.procID = nil
         }
-        // Etter AudioDeviceStop kommer ingen flere callbacks, så fila kan lukkes trygt.
+        // Etter AudioDeviceStop kommer ingen flere callbacks, så fila kan lukkes trygt
+        // og fasiten om systemlyden hentes ut.
+        heardSystemSound = sink?.heardSound ?? false
         sink = nil
         if aggregateID != kAudioObjectUnknown {
             AudioHardwareDestroyAggregateDevice(aggregateID)
@@ -309,6 +318,10 @@ final class Recorder: ObservableObject {
 /// kjører på en sanntidstråd.
 private final class Sink: @unchecked Sendable {
     let url: URL
+    /// Nektes lydopptakstillatelsen leverer tappen bare nuller, og alt returnerer
+    /// `noErr` — dette er eneste måten å oppdage det på. Skrives fra sanntidstråden,
+    /// leses først etter `AudioDeviceStop`, så det er ingen samtidig tilgang.
+    private(set) var heardSound = false
     private let file: AVAudioFile
     private let buffer: AVAudioPCMBuffer
 
@@ -335,6 +348,7 @@ private final class Sink: @unchecked Sendable {
         let frames = mixDown(list, into: out, capacity: Int(buffer.frameCapacity))
         guard frames > 0 else { return }
         buffer.frameLength = AVAudioFrameCount(frames)
+        if !heardSound, (0..<frames).contains(where: { out[$0] != 0 }) { heardSound = true }
         // ponytail: skriver til fil fra sanntidstråden. Verste utfall er et klikk i
         // opptaket, ikke tap av det. Hører du klikk i lange opptak, er oppgraderingen
         // ring-buffer + egen skrivetråd.
