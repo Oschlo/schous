@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     @StateObject private var job = TranscriptionJob()
     @ObservedObject private var settings = AppSettings.shared
+    @ObservedObject private var recorder = Recorder.shared
 
     // --input <sti>: forhåndsvelger fil ved oppstart (Finder «Åpne med», og gjør appen testbar).
     @State private var input: URL? = CommandLine.arguments.firstIndex(of: "--input")
@@ -36,6 +37,15 @@ struct ContentView: View {
     private var setup: some View {
         VStack(alignment: .leading, spacing: 16) {
             dropZone
+
+            // Menylinjemenyen lukkes av selve stopp-klikket, og miksingen blir
+            // ferdig først etterpå — sto feilen bare der, ville ingen sett den.
+            if let error = recorder.errorMessage {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             HStack {
                 Text("Lagre i").frame(width: 70, alignment: .leading)
