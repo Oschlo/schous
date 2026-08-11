@@ -71,14 +71,28 @@ rm -f key.pem id.p12                       # privatnøkkelen ligger i Keychain n
 
 `security find-identity -v -p codesigning` viser fortsatt `0 valid identities` —
 det er forventet og betyr bare at rota ikke er trust'et. `codesign --sign "Schous
-Dev"` virker likevel. Angre: `security delete-identity -c "Schous Dev"`.
+Dev"` virker likevel, og **uten `-v` listes identiteten**, som er derfor
+`bundle.sh` sjekker akkurat den formen. Angre: `security delete-identity -c
+"Schous Dev"`.
+
+**Prisen for at det er stille: alt som kjører som deg kan signere som Schous.**
+Nøkkelen ligger i login-nøkkelringen, som er ulåst hele økta, og
+`-T /usr/bin/codesign` gjør at codesign får den uten å spørre. Da kan hvilken som
+helst lokal prosess signere en vilkårlig binær med `-i co.oschlo.schous` og få
+nøyaktig samme designated requirement — og dermed appens mikrofon-, lydopptak- og
+`HF_TOKEN`-tilganger. Ad-hoc hadde ikke det hullet, fordi cdhash-en flyttet seg
+ved hver build. Byttet er altså en bevisst avveining: én manuell godkjenning spart
+per build, mot en TCC-grant som ikke lenger er bundet til én binær. Greit på en
+utviklermaskin, ikke greit å ta med i noe som distribueres. Vil du ha begge deler,
+er veien en egen låst nøkkelring som `bundle.sh` låser opp og igjen rundt
+signeringen — det koster ett passordspørsmål per build.
 
 **Byttet fra ad-hoc til sertifikat er selv et identitetsbytte**, så det koster én
 siste runde med spørsmål. Deretter er det stille.
 
 **No Xcode project, on purpose.** This machine has only Command Line Tools, and
 SwiftUI/AppKit/UniformTypeIdentifiers all ship in the CLT SDK. `bundle.sh`
-assembles the `.app` by hand (binary + Info.plist + ad-hoc codesign). Don't
+assembles the `.app` by hand (binary + Info.plist + codesign). Don't
 "upgrade" this to an `.xcodeproj` without a reason — it would add a 5 GB
 dependency for nothing.
 

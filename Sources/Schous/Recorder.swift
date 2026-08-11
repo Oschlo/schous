@@ -57,7 +57,14 @@ final class Recorder: ObservableObject {
                 }
             } catch {
                 errorMessage = "\(error)"
+                // Mikrofonen starter nå før tappen (se `begin`), så et hvilket som
+                // helst kast etter den linja etterlater et ferdigskrevet opptak av
+                // brukerens stemme i temp. `teardown` stopper opptakeren, men sletter
+                // ikke — den brukes også av `stop()`, der filene skal overleve til
+                // miksingen. Rydd derfor her, og bare her.
+                let orphans = [mic?.url, sink?.url].compactMap { $0 }
                 teardown()
+                for url in orphans { try? FileManager.default.removeItem(at: url) }
             }
         }
     }
