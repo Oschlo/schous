@@ -122,7 +122,7 @@ Changing the default output device mid-recording is harmless — measured at
 switching back. The tap captures process output, not a device; the output device
 is only the clock. Don't add device-change handling for a problem that isn't.
 
-Four things that already cost time:
+Five things that already cost time:
 
 1. **The microphone cannot be a sub-device of that aggregate.** It was the first
    design — Core Audio would have delivered both sources sample-synced in one
@@ -133,15 +133,35 @@ Four things that already cost time:
    bundle with granted microphone access. The mic is therefore recorded
    separately with `AVAudioRecorder` and merged with ffmpeg at stop. Don't
    "simplify" it back.
-2. **The IOProc block must be built in a `nonisolated` context.** Created inside
+2. **The mic must be started *before* the tap, not after.**
+   `AVAudioRecorder.record()` starts an AudioQueue that bottoms out in
+   `AudioDeviceStart` on the HAL's *input* device. Called right after the
+   aggregate has been started, it collides with the HAL's own
+   `RebuildIOContext` for the change the aggregate just triggered, and the two
+   deadlock on `HALB_Mutex`. The app hangs forever — no error code, no timeout,
+   no callback. `sample(1)` on the hung process:
+
+   ```
+   main-thread   [AVAudioRecorder record] → AudioQueueStart → AudioDeviceStart
+                 → HALC_ProxyIOContext::_StartIO → HALB_Mutex::Lock → __psynch_mutexwait
+   ProxyNotif    ProxyObject_PropertiesChanged → HALC_ShellDevice::RebuildIOContext
+                 → HALC_ProxyIOContext::PauseIO  → HALB_Mutex::Lock → __psynch_mutexwait
+   ```
+
+   Measured on macOS 26.6.1: hangs 2/2 with the mic last, 3/3 clean rounds with
+   the mic first. It is a race, so a passing run proves nothing — only the
+   ordering does. The consequence is that the mic's sample rate comes from the
+   input device rather than the aggregate, which does not exist yet. Harmless:
+   ffmpeg mixes the two tracks regardless, they never had to match.
+3. **The IOProc block must be built in a `nonisolated` context.** Created inside
    a `@MainActor` method it inherits MainActor isolation, and Swift 6 kills the
    process with SIGTRAP (`_dispatch_assert_queue_fail` →
    `swift_task_checkIsolatedSwift`) the moment Core Audio calls it on the audio
    thread. `Recorder.makeIOProc` exists only for this.
-3. **`amix` needs `normalize=0`.** Default amix divides each input by the number
+4. **`amix` needs `normalize=0`.** Default amix divides each input by the number
    of inputs, so a meeting where only one party talks at a time comes out 6 dB
    low.
-4. **`Window`, not `WindowGroup`.** `openWindow(id:)` against a WindowGroup opens
+5. **`Window`, not `WindowGroup`.** `openWindow(id:)` against a WindowGroup opens
    a *new* window per recording instead of raising the existing one.
 
 The menu bar icon is `Resources/MenuBarIcon.png` — the same 16x16 sprite as the

@@ -99,6 +99,29 @@ final class Recorder: ObservableObject {
     // MARK: - Oppsett
 
     private func begin(microphone: Bool) throws {
+        // **Mikrofonen må startes før tappen, ikke etter.** AVAudioRecorder.record()
+        // starter en AudioQueue, som ender i AudioDeviceStart på HAL-ens inngangsenhet.
+        // Skjer det rett etter at vi har startet aggregatet, kolliderer den med
+        // HAL-ens egen RebuildIOContext for endringen aggregatet nettopp utløste, og
+        // de to låser hverandre i HALB_Mutex — appen henger for godt, uten feilkode.
+        // Målt med sample(1): hovedtråden i HALC_ProxyIOContext::_StartIO, lyttekøen
+        // i RebuildIOContext → PauseIO, begge i __psynch_mutexwait. Med mikrofonen
+        // først går tre runder på rad rent. Ikke bytt om på dette igjen.
+        //
+        // Egen samplerate på mikrofonen som følge: aggregatet finnes ikke ennå.
+        // Sporene mikses av ffmpeg uansett, så de trenger ikke samme rate.
+        if microphone {
+            let rate = (try? defaultDeviceID(kAudioHardwarePropertyDefaultInputDevice))
+                .flatMap { nominalSampleRate(of: $0) } ?? 48_000
+            mic = try? AVAudioRecorder(url: scratch("mic"), settings: [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: rate,
+                AVNumberOfChannelsKey: 1,
+            ])
+            // Feiler mikrofonen, tas systemlyden opp alene — fortsatt et brukbart opptak.
+            if mic?.record() != true { mic = nil }
+        }
+
         // Aggregatet trenger en klokkekilde; utgangsenheten er den naturlige.
         // Den skal være alene her — se klassekommentaren.
         let outputUID = try defaultDeviceUID(kAudioHardwarePropertyDefaultOutputDevice)
@@ -136,16 +159,6 @@ final class Recorder: ObservableObject {
         guard let sink else { return }
         procID = try Self.makeIOProc(sink, on: aggregateID)
         try ck(AudioDeviceStart(aggregateID, procID), "kunne ikke starte opptaket")
-
-        // Mikrofonen sist: feiler den, står systemlyd-opptaket allerede og går.
-        if microphone {
-            mic = try? AVAudioRecorder(url: scratch("mic"), settings: [
-                AVFormatIDKey: kAudioFormatMPEG4AAC,
-                AVSampleRateKey: sampleRate,
-                AVNumberOfChannelsKey: 1,
-            ])
-            if mic?.record() != true { mic = nil }
-        }
     }
 
     private func teardown() {
@@ -441,17 +454,21 @@ private func address(_ selector: AudioObjectPropertySelector) -> AudioObjectProp
                                mElement: kAudioObjectPropertyElementMain)
 }
 
-private func defaultDeviceUID(_ selector: AudioObjectPropertySelector) throws -> String {
+private func defaultDeviceID(_ selector: AudioObjectPropertySelector) throws -> AudioObjectID {
     var addr = address(selector)
     var deviceID = AudioObjectID(kAudioObjectUnknown)
     var size = UInt32(MemoryLayout<AudioObjectID>.size)
     try ck(AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject),
                                       &addr, 0, nil, &size, &deviceID), "fant ingen lydenhet")
     guard deviceID != kAudioObjectUnknown else { throw RecorderError("fant ingen lydenhet") }
+    return deviceID
+}
 
-    addr = address(kAudioDevicePropertyDeviceUID)
+private func defaultDeviceUID(_ selector: AudioObjectPropertySelector) throws -> String {
+    let deviceID = try defaultDeviceID(selector)
+    var addr = address(kAudioDevicePropertyDeviceUID)
     var ref: Unmanaged<CFString>?
-    size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+    var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
     try ck(AudioObjectGetPropertyData(deviceID, &addr, 0, nil, &size, &ref), "fant ikke enhets-UID")
     guard let uid = ref?.takeRetainedValue() else { throw RecorderError("fant ikke enhets-UID") }
     return uid as String
