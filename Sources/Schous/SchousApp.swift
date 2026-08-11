@@ -61,7 +61,7 @@ private struct MenuBarContent: View {
             // Etter stopp: løft vinduet, der opptaket nå ligger forhåndsvalgt.
             if wasRecording { showWindow() }
         }
-        if let mic = defaultInputName() {
+        if let mic = recorder.inputName {
             Text("Mikrofon: \(mic)")
         }
         if let error = recorder.errorMessage {
