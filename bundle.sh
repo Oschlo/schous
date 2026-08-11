@@ -14,6 +14,18 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Schous"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 
+# Versjonen stemples fra git, ikke vedlikeholdt for hånd i Info.plist — det er den
+# samme strengen «Se etter oppdateringer» sammenligner med taggen på GitHub, så en
+# glemt håndredigering ville fått appen til å melde om oppdatering til seg selv.
+# Bare kopien i bundlen endres; Resources/Info.plist blir aldri skitten i git.
+# Uten tagger gir git describe en sha, som ikke er en versjon — da står 0.1.0 fra
+# Info.plist, og sjekken sammenligner mot den til første `./release.sh`.
+VERSION=$(git describe --tags --match 'v[0-9]*' --dirty 2>/dev/null | sed 's/^v//' || true)
+if [[ -n "$VERSION" ]]; then
+  plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP/Contents/Info.plist"
+  plutil -replace CFBundleVersion -string "$(git rev-list --count HEAD)" "$APP/Contents/Info.plist"
+fi
+
 # Ikonet bygges fra pikselrutenettet i icon.py, så .icns er et byggeartefakt
 # og ikke en binærblob i git.
 /usr/bin/python3 icon.py >/dev/null

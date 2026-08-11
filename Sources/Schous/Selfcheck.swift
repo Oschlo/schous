@@ -7,6 +7,7 @@ import Foundation
 func runSelfcheckAndExit() -> Never {
     segmentSelfcheck()
     recorderSelfcheck()
+    updateSelfcheck()
 
     let job = TranscriptionJob()
 
@@ -95,6 +96,22 @@ private func verifyAgainstBackend(base: URL) {
         check(mine == theirs, ".\(ext) avviker fra backend:\nmin:  \(mine.debugDescription)\nderes: \(theirs.debugDescription)")
     }
     print("  verifisert mot backend: \(segs.count) segmenter, .txt og .srt byte-identiske")
+}
+
+/// Versjonssammenligningen i Update.swift. Feiler den, maser appen enten om en
+/// oppdatering som ikke finnes, eller tier om en som gjør det.
+private func updateSelfcheck() {
+    check(isNewer("0.2.0", than: "0.1.0"), "0.2.0 > 0.1.0")
+    check(!isNewer("0.1.0", than: "0.2.0"), "0.1.0 er ikke nyere enn 0.2.0")
+    check(!isNewer("0.1.0", than: "0.1.0"), "lik versjon er ikke nyere")
+    // Leksikografisk ville «0.10.0» < «0.9.0», og oppdateringen aldri blitt tilbudt.
+    check(isNewer("0.10.0", than: "0.9.0"), "0.10.0 > 0.9.0")
+    // Ulik lengde: 1.1 er 1.1.0.
+    check(isNewer("1.1", than: "1.0.9"), "1.1 > 1.0.9")
+    check(!isNewer("1.0", than: "1.0.0"), "1.0 er ikke nyere enn 1.0.0")
+    // git describe mellom to tagger: bygget er nyere enn taggen, ikke eldre.
+    check(!isNewer("0.2.0", than: "0.2.0-3-gf84a688"), "dev-build etter taggen skal ikke mases om")
+    check(isNewer("0.3.0", than: "0.2.0-3-gf84a688"), "ny tagg slår dev-build")
 }
 
 /// Miksingen i Recorder.swift: kanaler innenfor en kilde snittes, kilder summeres.
