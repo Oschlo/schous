@@ -18,7 +18,22 @@ pakk ut, og legg `Schous.app` i `/Applications`.
 
 Appen er signert med et lokalt sertifikat, ikke notarisert hos Apple. Laster du
 den ned i en nettleser, blir den satt i karantene og Gatekeeper nekter å åpne
-den — høyreklikk → Åpne én gang, eller `xattr -d com.apple.quarantine Schous.app`.
+den — **høyreklikk → Åpne** slipper den igjennom med signaturen sjekket.
+
+`xattr -d com.apple.quarantine Schous.app` virker også, men slår av
+signatursjekken helt, ikke bare notariseringskravet. Bruker du den, sjekk først
+at du har den appen du tror:
+
+```zsh
+codesign --verify --strict -R \
+  '=identifier "co.oschlo.schous" and certificate leaf = H"b300de7a202552c6323463dc139682eee3f704cb"' \
+  Schous.app && echo ok
+```
+
+Ingen utskrift utenom `ok` betyr at bundlen er hel og signert med samme
+sertifikat som forrige gang — som også er det mikrofon-, lydopptaks- og
+`HF_TOKEN`-tilgangene henger på, så en app som ikke passerer ville spurt om alt
+på nytt uansett.
 
 Menylinja har **Se etter oppdateringer…**, og appen sjekker i tillegg stille én
 gang i døgnet ved oppstart. Finner den en nyere utgivelse, tilbyr menyen å åpne

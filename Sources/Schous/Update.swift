@@ -17,7 +17,6 @@ final class Updater: ObservableObject {
     @Published private(set) var status: String?
 
     private static let api = URL(string: "https://api.github.com/repos/Oschlo/schous/releases/latest")!
-    private var page: URL?
 
     /// Nil under `swift build`, som kjører uten .app-bundle og dermed uten
     /// Info.plist. Da er det ingen versjon å sammenligne med, og sjekken hopper
@@ -32,12 +31,18 @@ final class Updater: ObservableObject {
         let key = "lastUpdateCheck"
         let last = UserDefaults.standard.object(forKey: key) as? Date ?? .distantPast
         guard Date().timeIntervalSince(last) > 24 * 3600 else { return }
-        UserDefaults.standard.set(Date(), forKey: key)
-        await check(quiet: true)
+        // Stempelet settes først når GitHub faktisk svarte. En app som starter før
+        // nettet er oppe ville ellers brent døgnets sjekk på en feil ingen ser.
+        if await check(quiet: true) { UserDefaults.standard.set(Date(), forKey: key) }
     }
 
-    func check(quiet: Bool = false) async {
-        guard let current = Self.current else { return }
+    /// Returnerer om GitHub svarte i det hele tatt — `checkIfDue` stempler bare da.
+    @discardableResult
+    func check(quiet: Bool = false) async -> Bool {
+        guard let current = Self.current else { return false }
+        // Menylinja lever i ukevis. Uten dette står «Fant ikke ut av det: …» fra en
+        // sjekk i forrige uke og lyser mens den neste er underveis.
+        status = nil
         do {
             var req = URLRequest(url: Self.api)
             // Uten denne svarer GitHub med v3-standardformatet uansett, men de ber
@@ -51,40 +56,36 @@ final class Updater: ObservableObject {
             guard code == 200 else {
                 available = nil
                 status = quiet ? nil : (code == 404 ? "Ingen utgivelser ennå." : "GitHub svarte \(code).")
-                return
+                return true   // GitHub svarte, bare ikke med en utgivelse
             }
-            let release = try JSONDecoder.gitHub.decode(Release.self, from: data)
-            page = URL(string: release.htmlUrl)
-            let latest = release.tagName.trimmingPrefix("v")
-            if isNewer(String(latest), than: current) {
-                available = String(latest)
-                status = nil
+            let release = try JSONDecoder().decode(Release.self, from: data)
+            let latest = String(release.tagName.trimmingPrefix("v"))
+            if isNewer(latest, than: current) {
+                available = latest
             } else {
                 available = nil
                 status = quiet ? nil : "Du har nyeste versjon (\(current))."
             }
+            return true
         } catch {
             status = quiet ? nil : "Fant ikke ut av det: \(error.localizedDescription)"
+            return false
         }
     }
 
-    /// Åpner release-siden — den konkrete når sjekken fant en, ellers oversikten.
+    /// Åpner nyeste utgivelse. Adressen bygges her og leses ikke ut av svaret:
+    /// `html_url` er en streng fra nettet, og `NSWorkspace.open` bryr seg ikke om
+    /// hvilket skjema den har — `file://` ville startet en app på maskinen.
+    /// GitHub redirigerer `/releases/latest` til den konkrete siden uansett.
     func openReleasePage() {
-        NSWorkspace.shared.open(page ?? URL(string: "https://github.com/Oschlo/schous/releases")!)
+        NSWorkspace.shared.open(URL(string: "https://github.com/Oschlo/schous/releases/latest")!)
     }
 
     private struct Release: Decodable {
         let tagName: String
-        let htmlUrl: String
-    }
-}
 
-private extension JSONDecoder {
-    static let gitHub: JSONDecoder = {
-        let d = JSONDecoder()
-        d.keyDecodingStrategy = .convertFromSnakeCase
-        return d
-    }()
+        enum CodingKeys: String, CodingKey { case tagName = "tag_name" }
+    }
 }
 
 /// Sammenligner versjoner tallvis, ikke leksikografisk — «0.10.0» er nyere enn

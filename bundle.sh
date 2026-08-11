@@ -18,8 +18,9 @@ cp Resources/Info.plist "$APP/Contents/Info.plist"
 # samme strengen «Se etter oppdateringer» sammenligner med taggen på GitHub, så en
 # glemt håndredigering ville fått appen til å melde om oppdatering til seg selv.
 # Bare kopien i bundlen endres; Resources/Info.plist blir aldri skitten i git.
-# Uten tagger gir git describe en sha, som ikke er en versjon — da står 0.1.0 fra
-# Info.plist, og sjekken sammenligner mot den til første `./release.sh`.
+# Uten tagger feiler git describe («No names found», ingen --always her), VERSION blir
+# tom, og 0.1.0 fra Info.plist står — sjekken sammenligner mot den til første
+# `./release.sh`.
 VERSION=$(git describe --tags --match 'v[0-9]*' --dirty 2>/dev/null | sed 's/^v//' || true)
 if [[ -n "$VERSION" ]]; then
   plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP/Contents/Info.plist"
