@@ -216,6 +216,29 @@ in the same room, and the tracks are mixed to mono before whisper resamples to
 ~150 lines and trivial to rewrite if the ordering ever changes; what matters is
 that you re-measure rather than reason about it.
 
+**A Bluetooth headset used as both mic and output halves the system track.**
+Bluetooth Classic cannot carry good output and a microphone at once: the link runs
+either A2DP (one-way, full quality, no mic) or HFP (two-way, so the mic exists,
+but both directions drop to a speech profile). macOS switches the moment *any*
+process opens the device's input — `AVAudioRecorder.record()` is enough, and Zoom
+and FaceTime do the same thing. Measured here with AirPods Pro as both:
+
+```
+før mikrofonen åpnes:   utgang 48000 Hz    støtter [24000, 48000]
+mikrofon på, +50 ms:    utgang 24000 Hz
+mikrofon av, +3000 ms:  utgang 48000 Hz
+```
+
+Down within 50 ms, back only after ~3 s — macOS holds the HFP link in case another
+app grabs the mic. The trap is that **the aggregate's clock is the output device**,
+so the earbuds dropping to 24 kHz drags the *system* track down with it, even
+though system audio never touches the radio: CoreAudio has already resampled the
+whole mix to the device rate before the tap sees it. So the far end of a meeting is
+captured at half bandwidth as a side effect of which mic you picked. Recordings
+that come out at 24 kHz are this, not a bug in `Sink` or in `merge` — check the
+output device before investigating anything else. Any other mic keeps the system
+track at 48 kHz.
+
 Five things that already cost time:
 
 1. **The microphone cannot be a sub-device of that aggregate.** It was the first
