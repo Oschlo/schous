@@ -16,6 +16,66 @@ swift build              # development
 .build/debug/Schous --selfcheck
 ```
 
+### Signering — «Schous Dev», ikke ad-hoc
+
+`bundle.sh` signerer med en lokal selvsignert identitet ved navn **Schous Dev**,
+og faller tilbake til ad-hoc med en advarsel hvis den mangler.
+
+Grunnen er at ad-hoc-signatur gir
+
+```
+designated => cdhash H"8c421e16…"          # ny for hver eneste build
+```
+
+og både TCC (mikrofon, `kTCCServiceAudioCapture`) og Keychain-ACL-en på
+`HF_TOKEN` er nøklet på nøyaktig den strengen. Ad-hoc betyr derfor at **hver
+rebuild nullstiller alle tillatelser**: nytt mikrofon-spørsmål, nytt
+lydopptak-spørsmål, nytt Keychain-passord — midt i en test, og de må skrives inn
+for hånd. Med sertifikatet blir kravet
+
+```
+designated => identifier "co.oschlo.schous" and certificate leaf = H"b300de7a…"
+```
+
+som er identisk før og etter at binæren endrer seg. Godkjent én gang, og det står.
+
+Oppsettet er engangs, og sertifikatet trenger **ikke** å være trust'et — codesign
+tar det som det er:
+
+```zsh
+cd "$(mktemp -d)"
+cat > ext.cnf <<'EOF'
+[req]
+distinguished_name = dn
+prompt = no
+[dn]
+CN = Schous Dev
+[v3]
+basicConstraints = critical,CA:false
+keyUsage = critical,digitalSignature
+extendedKeyUsage = critical,codeSigning
+subjectKeyIdentifier = hash
+EOF
+openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem \
+  -days 3650 -config ext.cnf -extensions v3
+# -macalg/-certpbe/-keypbe er ikke valgfrie: OpenSSL 3 lager som standard en
+# PKCS#12 macOS' `security` ikke får verifisert («MAC verification failed»).
+openssl pkcs12 -export -inkey key.pem -in cert.pem -out id.p12 -passout pass:schous \
+  -name "Schous Dev" -macalg sha1 -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES
+# -T /usr/bin/codesign forhåndsgodkjenner codesign i nøkkelens ACL, ellers spør
+# Keychain om passord ved hver signering — altså akkurat det vi ble kvitt.
+security import id.p12 -k ~/Library/Keychains/login.keychain-db -P schous \
+  -T /usr/bin/codesign
+rm -f key.pem id.p12                       # privatnøkkelen ligger i Keychain nå
+```
+
+`security find-identity -v -p codesigning` viser fortsatt `0 valid identities` —
+det er forventet og betyr bare at rota ikke er trust'et. `codesign --sign "Schous
+Dev"` virker likevel. Angre: `security delete-identity -c "Schous Dev"`.
+
+**Byttet fra ad-hoc til sertifikat er selv et identitetsbytte**, så det koster én
+siste runde med spørsmål. Deretter er det stille.
+
 **No Xcode project, on purpose.** This machine has only Command Line Tools, and
 SwiftUI/AppKit/UniformTypeIdentifiers all ship in the CLT SDK. `bundle.sh`
 assembles the `.app` by hand (binary + Info.plist + ad-hoc codesign). Don't
@@ -206,6 +266,13 @@ limitation, not a UI nicety. `root()` follows merge chains with a hop limit;
 
 ## Testing gotchas
 
+- **Første kjøring etter et identitetsbytte krever et menneske.** Er appen
+  ad-hoc-signert (se «Signering»), gjelder det etter *hver* build: mikrofon,
+  lydopptak og Keychain spør på nytt, og dialogene må klikkes og passordet
+  skrives for hånd. En `open … && sleep 20 && sjekk resultatet` måler da bare en
+  app som står og venter på en dialog. Bygg med «Schous Dev»-identiteten, og hvis
+  et spørsmål likevel er ventet: si fra til brukeren og vent på svar før du
+  måler, ikke gjett på en delay.
 - `open Schous.app --args …` only passes arguments on a **fresh** launch.
   If the app is already running, `open` just activates it and `--input` is
   silently ignored. `pkill -x Schous` first.

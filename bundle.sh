@@ -20,8 +20,23 @@ cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp Resources/MenuBarIcon.png "$APP/Contents/Resources/MenuBarIcon.png"
 
-# ponytail: ad-hoc signering. Notarisering når appen faktisk skal distribueres.
-codesign --force --sign - "$APP"
+# Signering med den lokale «Schous Dev»-identiteten når den finnes, ellers ad-hoc.
+#
+# Dette er ikke pynt. Ad-hoc-signatur gir `designated => cdhash H"…"`, som endrer
+# seg ved hver eneste build — og både TCC (mikrofon, lydopptak) og Keychain-ACL-en
+# på HF_TOKEN er nøklet på nettopp den strengen. Ad-hoc betyr derfor at hver
+# rebuild krever at du godkjenner alt på nytt for hånd, midt i en test. Med
+# sertifikatet blir kravet `identifier "co.oschlo.schous" and certificate leaf =
+# H"…"`, som står stille for alltid. Se «Signering» i CLAUDE.md for oppsettet.
+#
+# ponytail: fortsatt lokalt selvsignert. Notarisering når appen skal distribueres.
+if security find-certificate -c "Schous Dev" >/dev/null 2>&1; then
+  codesign --force --sign "Schous Dev" "$APP"
+else
+  echo "advarsel: fant ikke «Schous Dev» — ad-hoc-signerer, og da må du godkjenne"
+  echo "         mikrofon, lydopptak og Keychain på nytt etter hver build."
+  codesign --force --sign - "$APP"
+fi
 
 # Spotlight finner apper på navn, og «Schous» sier ingenting om hva den gjør.
 # Søkeord MÅ settes som utvidet attributt — kMDItemKeywords i Info.plist leses
