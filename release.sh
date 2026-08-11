@@ -16,7 +16,16 @@ PUSHED=0
 abort() {
   echo "avbryter: $1"
   git tag -d "v$VERSION" >/dev/null 2>&1 || true
-  (( PUSHED )) && echo "taggen ligger på GitHub — angre med: git push --delete origin v$VERSION"
+  # Etter push finnes taggen — og kanskje et halvferdig utkast — på GitHub. Uten at
+  # begge ryddes bort, står en tagg som peker på en utgivelse som ikke finnes, og
+  # neste `./release.sh` med samme versjon dør på at taggen er tatt.
+  # `--cleanup-tag` tar taggen sammen med utkastet; finnes det ingen release ennå,
+  # feiler kommandoen og fjernaggen slettes direkte i stedet.
+  if (( PUSHED )); then
+    gh release delete "v$VERSION" --yes --cleanup-tag >/dev/null 2>&1 \
+      || git push --delete origin "v$VERSION" >/dev/null 2>&1 || true
+    echo "ryddet bort taggen og eventuelt utkast på GitHub — commiten står igjen på main."
+  fi
   exit 1
 }
 
@@ -62,6 +71,12 @@ rm -rf .release-verify
 
 git push origin HEAD "v$VERSION"
 PUSHED=1
-gh release create "v$VERSION" Schous.zip --generate-notes
+
+# Utkast først, publiser etterpå: `gh release create` er flere API-kall (opprett,
+# last opp arkivet, publiser), og feiler opplastingen midtveis ville en publisert
+# release ligget ute uten Schous.zip — README-en peker rett på den. Som utkast er
+# den usynlig til arkivet er oppe, og trap-en rydder den bort med `--cleanup-tag`.
+gh release create "v$VERSION" Schous.zip --generate-notes --draft
+gh release edit "v$VERSION" --draft=false >/dev/null
 rm -f Schous.zip
 echo "ok: v$VERSION lagt ut"
