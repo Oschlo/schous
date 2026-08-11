@@ -481,6 +481,20 @@ private func defaultDeviceUID(_ selector: AudioObjectPropertySelector) throws ->
     return uid as String
 }
 
+/// Navnet på systemets standard-inndata — det `AVAudioRecorder` faktisk tar opp
+/// fra, siden macOS ikke lar oss peke på en enhet. Vises i menyen så brukeren
+/// ser hvilken mikrofon opptaket treffer *før* start. `nil` om ingen finnes.
+func defaultInputName() -> String? {
+    guard let deviceID = try? defaultDeviceID(kAudioHardwarePropertyDefaultInputDevice)
+    else { return nil }
+    var addr = address(kAudioObjectPropertyName)
+    var ref: Unmanaged<CFString>?
+    var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+    guard AudioObjectGetPropertyData(deviceID, &addr, 0, nil, &size, &ref) == noErr,
+          let name = ref?.takeRetainedValue() else { return nil }
+    return name as String
+}
+
 private func nominalSampleRate(of device: AudioObjectID) -> Double? {
     var addr = address(kAudioDevicePropertyNominalSampleRate)
     var rate = Double(0)
