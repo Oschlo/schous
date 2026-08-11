@@ -47,7 +47,6 @@ func runSelfcheckAndExit() -> Never {
     let segs = [Segment(start: 4.216, end: 7.905, speaker: "SPEAKER_00", language: "sv", text: "Hei.")]
     let dir = URL.temporaryDirectory.appending(path: "schous-selfcheck-\(getpid())")
     try! FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(at: dir) }
     try! writeOutputs(segs, to: dir, base: "t", names: ["SPEAKER_00": "Hans Martin"])
 
     let txt = try! String(contentsOf: dir.appending(path: "t.txt"), encoding: .utf8)
@@ -55,6 +54,11 @@ func runSelfcheckAndExit() -> Never {
     let srt = try! String(contentsOf: dir.appending(path: "t.srt"), encoding: .utf8)
     check(srt == "1\n00:00:04,216 --> 00:00:07,905\nHans Martin (sv): Hei.\n\n",
           "srt: \(srt.debugDescription)")
+    // Ikke `defer`: funksjonen ender i exit(), som ikke kjører defer-blokker — da
+    // ble katalogen liggende igjen i temp etter hver eneste kjøring. Ryddes her,
+    // der `dir` er ferdig brukt, så en senere feil ikke lekker den heller.
+    // Feiler sjekkene over, står den igjen med vilje: da vil man se innholdet.
+    try? FileManager.default.removeItem(at: dir)
 
     // Valgfritt: sammenlign porten mot ekte backend-output.
     // Schous --selfcheck <jobbmappe>/output/<base>
