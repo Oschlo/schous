@@ -117,6 +117,13 @@ private func recorderSelfcheck() {
     let ragged = mix([(1, [0.3, 0.3, 0.3]), (1, [0.2])])
     check(ragged ≈ [0.5], "korteste buffer styrer: \(ragged)")
 
+    // En tapp uten lydopptakstillatelse leverer nuller. Stillhetsvarselet i
+    // `Sink.render` hviler på at de kommer uendret gjennom miksen — summeres de
+    // til noe annet enn null, slutter varselet å utløses.
+    let muted = mix([(2, [0, 0, 0, 0])])
+    check(muted ≈ [0, 0], "digital stillhet: \(muted)")
+    check(!muted.contains { $0 != 0 }, "stillhetsvarselet ville ikke utløst")
+
     // Rydding av råfiler etter miksing. Feiler miksingen, er scratchfilene det
     // eneste som er igjen av opptaket — da slettes ingen av dem.
     let sys = URL(fileURLWithPath: "/tmp/schous-system.m4a")

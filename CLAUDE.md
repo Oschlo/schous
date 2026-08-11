@@ -106,6 +106,11 @@ uten nøkkelen    calls=862 bufs=[1] channels=[2] peak=0.0
 med nøkkelen     calls=849 bufs=[1] channels=[2] peak=0.198
 ```
 
+The key only buys the *prompt*. Say no to it and the tap is exactly as silent,
+still with no error code anywhere — so `Sink.heardSound` watches for a system
+track that is all zeros and `stop()` points the user at Privacy & Security. That
+flag is the only signal this failure has; don't drop it for looking redundant.
+
 That is why the early probes looked fine: run from Terminal, the tap inherits
 **Terminal's** audio-capture grant, and a loose `swiftc` binary gives signal even
 with no key anywhere. Any measurement of the tap has to be `open`ed as a bundle,
