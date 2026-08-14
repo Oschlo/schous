@@ -156,6 +156,31 @@ private func recorderSelfcheck() {
     check(muted ≈ [0, 0], "digital stillhet: \(muted)")
     check(!muted.contains { $0 != 0 }, "stillhetsvarselet ville ikke utløst")
 
+    // Stillhetsvarselet. Hele verdien ligger i at det *ikke* slår ut når
+    // stillheten er forventet — et varsel som ofte tar feil blir ignorert den
+    // dagen det gjelder.
+    check(Recorder.systemWarning(silentFor: 30, somethingIsPlaying: false) == nil,
+          "stille tapp uten avspilling skal tie")
+    check(Recorder.systemWarning(silentFor: 30, somethingIsPlaying: true) != nil,
+          "stille tapp mens noe spilles av er nektet tilgang, og skal si fra")
+    check(Recorder.systemWarning(silentFor: Recorder.systemGrace - 0.25,
+                                 somethingIsPlaying: true) == nil,
+          "ikke mas før nådetiden er ute")
+
+    check(Recorder.micWarning(silentFor: 60, hasMic: false) == nil,
+          "uten mikrofon er stillhet på mikrofonsporet ikke en feil")
+    check(Recorder.micWarning(silentFor: 60, hasMic: true) != nil,
+          "en mikrofon som ikke leverer noe skal si fra")
+    check(Recorder.micWarning(silentFor: Recorder.micGrace - 0.25, hasMic: true) == nil,
+          "ikke mas før nådetiden er ute")
+
+    // Måleren: gulvet er -60 dB, taket 0.
+    check(Recorder.scale(db: -160) == 0, "digital stillhet er tomt utslag")
+    check(Recorder.scale(db: -60) == 0, "gulvet er tomt utslag")
+    check(Recorder.scale(db: 0) == 1, "0 dBFS er fullt utslag")
+    check(abs(Recorder.scale(db: -30) - 0.5) < 1e-6, "midt på: \(Recorder.scale(db: -30))")
+    check(Recorder.scale(db: 6) == 1, "over taket klemmes")
+
     // Rydding av råfiler etter miksing. Feiler miksingen, er scratchfilene det
     // eneste som er igjen av opptaket — da slettes ingen av dem.
     let sys = URL(fileURLWithPath: "/tmp/schous-system.m4a")

@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreAudio
+import os
 
 /// Opptak av systemlyd + mikrofon via Core Audio process tap (macOS 14.2+).
 ///
@@ -30,6 +31,12 @@ final class Recorder: ObservableObject {
     /// menyen. Målt: meny åpnet tre ganger uten at noe publiserer gir én
     /// evaluering av `body`, ikke tre.
     @Published private(set) var inputLabel: String? = defaultInputLabel()
+    /// 0…1 for måleren i menyen, skalert fra dB. Oppdateres fire ganger i sekundet.
+    @Published private(set) var systemLevel: Float = 0
+    @Published private(set) var micLevel: Float = 0
+    /// Varsel *under* opptak. Skilt fra `errorMessage`, som handler om det som
+    /// gikk galt etterpå — en obduksjon hjelper ingen mens møtet fortsatt går.
+    @Published private(set) var liveWarning: String?
 
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
@@ -39,6 +46,8 @@ final class Recorder: ObservableObject {
     private var destination: URL?
     private var ticker: Task<Void, Never>?
     private var heardSystemSound = false
+    private var systemSilent: TimeInterval = 0
+    private var micSilent: TimeInterval = 0
 
     private init() {
         // Dette er *inndata*-velgeren, ikke utgangsenheten under opptak — den
@@ -61,6 +70,9 @@ final class Recorder: ObservableObject {
     func start() {
         guard !isRecording else { return }
         errorMessage = nil
+        liveWarning = nil
+        systemSilent = 0; micSilent = 0
+        systemLevel = 0; micLevel = 0
         Task {
             // Første gang gir dette systemets mikrofon-prompt. Nektes den, tas
             // systemlyden opp alene — det er fortsatt et brukbart opptak.
@@ -73,9 +85,10 @@ final class Recorder: ObservableObject {
                 let startedAt = Date()
                 ticker = Task { @MainActor [weak self] in
                     while !Task.isCancelled {
-                        try? await Task.sleep(for: .seconds(1))
+                        try? await Task.sleep(for: .milliseconds(Int(Self.tick * 1000)))
                         guard let self, !Task.isCancelled else { return }
                         elapsed = Date().timeIntervalSince(startedAt)
+                        sample()
                     }
                 }
             } catch {
@@ -99,6 +112,8 @@ final class Recorder: ObservableObject {
         teardown()
         isRecording = false
         elapsed = 0
+        liveWarning = nil
+        systemLevel = 0; micLevel = 0
         // Info.plist-nøkkelen utløser spørsmålet, men svaret kan bli nei — og da er
         // tappen like taus som før nøkkelen fantes, uten en eneste feilkode.
         if !heardSystemSound {
@@ -126,6 +141,60 @@ final class Recorder: ObservableObject {
         }
     }
 
+    // MARK: - Overvåking under opptak
+
+    /// Hvor ofte nivåene leses. Fire ganger i sekundet er nok til å se at det
+    /// lever, og billig nok til å gjøre på hovedtråden.
+    private static let tick: TimeInterval = 0.25
+    /// Hvor lenge en kilde må være helt død før den sier fra. Nok til å ri av en
+    /// pause i avspillingen, kort nok til at møtet fortsatt pågår.
+    static let systemGrace: TimeInterval = 10
+    static let micGrace: TimeInterval = 15
+
+    private func sample() {
+        let peak = sink?.takePeak() ?? 0
+        systemLevel = Self.scale(db: peak > 0 ? 20 * log10(peak) : -160)
+
+        var micDB: Float? = nil
+        if let mic {
+            mic.updateMeters()
+            micDB = mic.averagePower(forChannel: 0)
+            micLevel = Self.scale(db: micDB ?? -160)
+        }
+
+        systemSilent = peak > 0 ? 0 : systemSilent + Self.tick
+        // -120 dB er ikke «ingen snakker» — det er ingen bærebølge i det hele
+        // tatt. En mikrofon som virker leverer romstøy rundt -50 til -70.
+        micSilent = (micDB ?? 0) > -120 ? 0 : micSilent + Self.tick
+
+        // HAL-oppslaget gjøres bare når vi allerede er i ferd med å klage.
+        liveWarning = Self.systemWarning(silentFor: systemSilent,
+                                         somethingIsPlaying: systemSilent >= Self.systemGrace
+                                             && anyProcessIsPlayingOutput())
+            ?? Self.micWarning(silentFor: micSilent, hasMic: mic != nil)
+    }
+
+    /// Rene avgjørelser, skilt ut fordi det er nøyaktig her et varsel blir
+    /// ubrukelig: ett som ofte tar feil, blir ignorert den dagen det gjelder.
+    /// `--selfcheck` dekker begge.
+    static func systemWarning(silentFor: TimeInterval, somethingIsPlaying: Bool) -> String? {
+        guard silentFor >= systemGrace, somethingIsPlaying else { return nil }
+        return "Systemlyden er stille selv om noe spilles av — gi Schous tilgang "
+            + "under Personvern og sikkerhet → Lydopptak. Opptaket fanger bare "
+            + "mikrofonen slik det står nå."
+    }
+
+    static func micWarning(silentFor: TimeInterval, hasMic: Bool) -> String? {
+        guard hasMic, silentFor >= micGrace else { return nil }
+        return "Mikrofonen leverer ingenting — sjekk at riktig inngang er valgt "
+            + "og at den ikke er fysisk dempet."
+    }
+
+    /// dB → 0…1 for måleren. -60 dB er gulvet; under det er det uansett stillhet.
+    static func scale(db: Float) -> Float {
+        min(1, max(0, (db + 60) / 60))
+    }
+
     // MARK: - Oppsett
 
     private func begin(microphone: Bool) throws {
@@ -148,6 +217,7 @@ final class Recorder: ObservableObject {
                 AVSampleRateKey: rate,
                 AVNumberOfChannelsKey: 1,
             ])
+            mic?.isMeteringEnabled = true   // må settes før record(), ellers måler den ingenting
             // Feiler mikrofonen, tas systemlyden opp alene — fortsatt et brukbart opptak.
             if mic?.record() != true { mic = nil }
         }
@@ -365,8 +435,21 @@ private final class Sink: @unchecked Sendable {
     /// `noErr` — dette er eneste måten å oppdage det på. Skrives fra sanntidstråden,
     /// leses først etter `AudioDeviceStop`, så det er ingen samtidig tilgang.
     private(set) var heardSound = false
+    /// Toppnivået siden forrige avlesning. Låsen tas på sanntidstråden, men
+    /// `os_unfair_lock` uten strid er noen nanosekunder — og denne tråden skriver
+    /// allerede til fil (se `render`), som er uendelig mye dyrere.
+    private let recentPeak = OSAllocatedUnfairLock(initialState: Float(0))
     private let file: AVAudioFile
     private let buffer: AVAudioPCMBuffer
+
+    /// Leser og nullstiller. Nullstillingen er poenget: måleren skal vise nivået
+    /// nå, ikke det høyeste som noen gang har vært.
+    func takePeak() -> Float {
+        recentPeak.withLock { peak in
+            defer { peak = 0 }
+            return peak
+        }
+    }
 
     init(url: URL, sampleRate: Double, capacity: AVAudioFrameCount) throws {
         self.url = url
@@ -391,7 +474,13 @@ private final class Sink: @unchecked Sendable {
         let frames = mixDown(list, into: out, capacity: Int(buffer.frameCapacity))
         guard frames > 0 else { return }
         buffer.frameLength = AVAudioFrameCount(frames)
-        if !heardSound, (0..<frames).contains(where: { out[$0] != 0 }) { heardSound = true }
+        var loudest: Float = 0
+        for f in 0..<frames { loudest = max(loudest, abs(out[f])) }
+        let peak = loudest
+        if peak > 0 {
+            heardSound = true
+            recentPeak.withLock { $0 = max($0, peak) }
+        }
         // ponytail: skriver til fil fra sanntidstråden. Verste utfall er et klikk i
         // opptaket, ikke tap av det. Hører du klikk i lange opptak, er oppgraderingen
         // ring-buffer + egen skrivetråd.
@@ -531,6 +620,44 @@ func defaultInputLabel() -> String? {
     guard AudioObjectGetPropertyData(deviceID, &addr, 0, nil, &size, &ref) == noErr,
           let name = ref?.takeRetainedValue() else { return nil }
     return name as String
+}
+
+/// Sender noen *annen* prosess lyd ut akkurat nå?
+///
+/// Dette er hele grunnen til at stillhetsvarselet kan stoles på. Rene nuller fra
+/// tappen har to årsaker koden ikke kan skille på egen hånd — nektet
+/// lydopptakstillatelse, eller at ingenting faktisk ble spilt av — og et varsel
+/// som ikke skiller dem, slår ut på hvert eneste rene mikrofonopptak.
+///
+/// `kAudioHardwarePropertyProcessObjectList` + `kAudioProcessPropertyIsRunningOutput`
+/// (macOS 14.2+, samme generasjon som tappen) svarer sikkert i stedet for å gjette.
+@MainActor func anyProcessIsPlayingOutput() -> Bool {
+    let system = AudioObjectID(kAudioObjectSystemObject)
+    var addr = address(kAudioHardwarePropertyProcessObjectList)
+    var size = UInt32(0)
+    guard AudioObjectGetPropertyDataSize(system, &addr, 0, nil, &size) == noErr, size > 0
+    else { return false }
+    var ids = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+    guard AudioObjectGetPropertyData(system, &addr, 0, nil, &size, &ids) == noErr else { return false }
+
+    let me = ProcessInfo.processInfo.processIdentifier
+    for id in ids {
+        var running = UInt32(0)
+        var runningSize = UInt32(MemoryLayout<UInt32>.size)
+        var runningAddr = address(kAudioProcessPropertyIsRunningOutput)
+        guard AudioObjectGetPropertyData(id, &runningAddr, 0, nil, &runningSize, &running) == noErr,
+              running != 0 else { continue }
+        // Ikke oss selv: appen spiller ingenting av, men aggregatet vårt henger
+        // på utgangsenheten og kan bli talt med.
+        var pid = pid_t(0)
+        var pidSize = UInt32(MemoryLayout<pid_t>.size)
+        var pidAddr = address(kAudioProcessPropertyPID)
+        if AudioObjectGetPropertyData(id, &pidAddr, 0, nil, &pidSize, &pid) == noErr, pid == me {
+            continue
+        }
+        return true
+    }
+    return false
 }
 
 private func nominalSampleRate(of device: AudioObjectID) -> Double? {
