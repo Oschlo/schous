@@ -410,6 +410,12 @@ limitation, not a UI nicety. `root()` follows merge chains with a hop limit;
 - Driving the UI via System Events works, but setting a SwiftUI `TextField`'s
   AXValue directly does **not** fire the binding — click the field and
   `keystroke` instead, with delays.
+- **`click menu item …` does nothing to a `MenuBarExtra` menu, and returns
+  success while doing it.** `osascript` exits 0, no error, and the app never
+  sees the press — a test written that way silently measures an app that was
+  never told to do anything. `perform action "AXPress" of menu item …` works.
+  Reading `name of every menu item` works either way, so the menu can be
+  asserted on: the level meters and any live warning are menu items too.
 - Synthetic `say`-generated voices are useless for testing diarization; pyannote
   merges them into one speaker. Use a real recording to exercise merge/rename.
 
