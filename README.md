@@ -160,7 +160,7 @@ another process is actually playing something**, the app says the audio-capture
 permission is missing — it checks that rather than guessing, so a recording
 where nothing happened to be playing does not produce a false alarm.
 
-The menu shows which microphone the recording will hit — "Mikrofon: `<name>`" —
+The menu shows which microphone the recording will hit — "Inngang: `<name>`" —
 so you see it before you start rather than afterwards. If access is denied, the
 row says so, with the way to fix it.
 
