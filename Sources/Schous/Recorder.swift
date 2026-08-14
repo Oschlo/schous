@@ -168,10 +168,20 @@ final class Recorder: ObservableObject {
         micSilent = (micDB ?? 0) > -120 ? 0 : micSilent + Self.tick
 
         // HAL-oppslaget gjøres bare når vi allerede er i ferd med å klage.
-        liveWarning = Self.systemWarning(silentFor: systemSilent,
-                                         somethingIsPlaying: systemSilent >= Self.systemGrace
-                                             && anyProcessIsPlayingOutput())
-            ?? Self.micWarning(silentFor: micSilent, hasMic: mic != nil)
+        liveWarning = Self.warning(systemSilentFor: systemSilent,
+                                   somethingIsPlaying: systemSilent >= Self.systemGrace
+                                       && anyProcessIsPlayingOutput(),
+                                   micSilentFor: micSilent, hasMic: mic != nil)
+    }
+
+    /// Begge kildene kan svikte i samme opptak, og da er begge verdt å vite om.
+    /// En `??` her lot systemvarselet skygge for mikrofonvarselet resten av
+    /// opptaket — brukeren rettet det ene og mistet det andre uansett.
+    static func warning(systemSilentFor: TimeInterval, somethingIsPlaying: Bool,
+                        micSilentFor: TimeInterval, hasMic: Bool) -> String? {
+        let both = [systemWarning(silentFor: systemSilentFor, somethingIsPlaying: somethingIsPlaying),
+                    micWarning(silentFor: micSilentFor, hasMic: hasMic)].compactMap { $0 }
+        return both.isEmpty ? nil : both.joined(separator: " ")
     }
 
     /// Rene avgjørelser, skilt ut fordi det er nøyaktig her et varsel blir
@@ -179,9 +189,11 @@ final class Recorder: ObservableObject {
     /// `--selfcheck` dekker begge.
     static func systemWarning(silentFor: TimeInterval, somethingIsPlaying: Bool) -> String? {
         guard silentFor >= systemGrace, somethingIsPlaying else { return nil }
+        // Ingen påstand om at mikrofonen virker: den kan være død samtidig, og
+        // da står varslene ved siden av hverandre.
         return "Systemlyden er stille selv om noe spilles av — gi Schous tilgang "
-            + "under Personvern og sikkerhet → Lydopptak. Opptaket fanger bare "
-            + "mikrofonen slik det står nå."
+            + "under Personvern og sikkerhet → Lydopptak. Slik det står nå havner "
+            + "ikke systemlyden i opptaket."
     }
 
     static func micWarning(silentFor: TimeInterval, hasMic: Bool) -> String? {

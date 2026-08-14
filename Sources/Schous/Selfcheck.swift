@@ -174,6 +174,15 @@ private func recorderSelfcheck() {
     check(Recorder.micWarning(silentFor: Recorder.micGrace - 0.25, hasMic: true) == nil,
           "ikke mas før nådetiden er ute")
 
+    // Svikter begge, skal begge stå der — ikke bare den som kom først.
+    let begge = Recorder.warning(systemSilentFor: 30, somethingIsPlaying: true,
+                                 micSilentFor: 60, hasMic: true) ?? ""
+    check(begge.contains("Systemlyden") && begge.contains("Mikrofonen"),
+          "to døde kilder skal gi to varsler: \(begge)")
+    check(Recorder.warning(systemSilentFor: 30, somethingIsPlaying: false,
+                           micSilentFor: 0, hasMic: true) == nil,
+          "ingen døde kilder, ingen varsel")
+
     // Måleren: gulvet er -60 dB, taket 0.
     check(Recorder.scale(db: -160) == 0, "digital stillhet er tomt utslag")
     check(Recorder.scale(db: -60) == 0, "gulvet er tomt utslag")
