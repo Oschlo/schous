@@ -14,7 +14,6 @@ struct ContentView: View {
         ?? URL.downloadsDirectory.path
     @State private var speakers = ""
     @State private var dropping = false
-    @State private var confirmStop = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -102,6 +101,12 @@ struct ContentView: View {
             case .failed(let msg):
                 Label(msg, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.red).font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+            case .stopped(let n):
+                Label("Stoppet. \(n) segmenter er skrevet — «Start transkribering» "
+                      + "fortsetter der den slapp.", systemImage: "pause.circle.fill")
+                    .foregroundStyle(.orange).font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
             case .running, .paused:
                 HStack {
                     Text("\(job.step)/4 \(job.stepLabel)").font(.callout.weight(.medium))
@@ -141,18 +146,10 @@ struct ContentView: View {
             }
             Spacer()
             if isBusy {
-                Button("Stopp", role: .destructive) {
-                    if job.segmentsAtRisk > 0 { confirmStop = true } else { job.stop() }
-                }
-                .confirmationDialog(
-                    "\(job.segmentsAtRisk) av \(job.total) segmenter går tapt",
-                    isPresented: $confirmStop, titleVisibility: .visible
-                ) {
-                    Button("Stopp likevel", role: .destructive) { job.stop() }
-                    Button("Avbryt", role: .cancel) {}
-                } message: {
-                    Text("Backend lagrer ingenting før den er ferdig. Steg 1–3 er cachet og hoppes over ved ny start.")
-                }
+                // Ingen bekreftelsesdialog: backend skriver hvert ferdige segment
+                // til disk og gjenopptar der den slapp, så Stopp koster ingenting.
+                Button("Stopp") { job.stop() }
+                    .help("Skriver det som er ferdig. En ny start fortsetter der den slapp.")
             } else {
                 Button("Start transkribering") { start() }
                     .buttonStyle(.borderedProminent)
