@@ -24,7 +24,7 @@ final class Recorder: ObservableObject {
     @Published private(set) var errorMessage: String?
     /// Settes når et opptak er ferdig skrevet. ContentView lytter og forhåndsvelger fila.
     @Published var lastRecording: URL?
-    /// Det menyen viser etter «Mikrofon: » — enhetsnavnet, eller hvorfor det ikke
+    /// Det menyen viser etter «Inngang: » — enhetsnavnet, eller hvorfor det ikke
     /// blir noe mikrofonspor. Må være `@Published` og ikke et oppslag i `body`:
     /// SwiftUI bygger menyinnholdet én gang og gjenbruker det, så uten en publisert
     /// endring blir navnet stående på forrige enhet helt til noe annet oppdaterer

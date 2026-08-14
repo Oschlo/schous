@@ -74,7 +74,9 @@ private struct MenuBarContent: View {
             }
         }
         if let mic = recorder.inputLabel {
-            Text("Mikrofon: \(mic)")
+            // «Inngang», ikke «Mikrofon»: målerraden over heter allerede
+            // Mikrofon, og to rader med samme ord leses som en gjentakelse.
+            Text("Inngang: \(mic)")
         }
         if let warning = recorder.liveWarning {
             Text("⚠︎ \(warning)")
