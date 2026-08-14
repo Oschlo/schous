@@ -7,6 +7,9 @@ Drop in a file — or record system audio straight from the menu bar — pick wh
 the result goes, watch the progress, and name the speakers afterwards. SwiftUI,
 no third-party dependencies, no Xcode.
 
+![The speaker editor: transcript on the left with names applied, speaker list on
+the right where IDs are renamed and merged](docs/speakers.png)
+
 The name comes from Schous plass in Oslo. Since that gives away nothing about
 what the app does, `bundle.sh` puts Spotlight keywords on the bundle — searching
 for "transkribering" or "transcribe" finds it.
@@ -131,6 +134,9 @@ Two buttons check the two halves:
 5. When it finishes: name the speakers, merge IDs that are the same person, and
    **Lagre**.
 
+![Step 4 of 4: a progress bar, a segment counter, an estimate of the time left,
+and the speaker and language of the segment being transcribed](docs/progress.png)
+
 Writes `<name>.txt`, `<name>.srt` and `<name>.json` to the folder you chose.
 
 ## Recording from the menu bar
@@ -144,6 +150,15 @@ plus your own voice.
    `Opptak-2026-08-10-1432.m4a`, in the same folder chosen under "Lagre i".
 3. The window comes forward with the recording preselected. From there it is
    ordinary transcription — you decide whether and when.
+
+![The menu bar during a recording: elapsed time, and a level meter for system
+audio and microphone side by side](docs/recording.png)
+
+Both levels are visible while the recording runs, so a dead track shows up
+during the meeting rather than after it. If system audio stays silent **while
+another process is actually playing something**, the app says the audio-capture
+permission is missing — it checks that rather than guessing, so a recording
+where nothing happened to be playing does not produce a false alarm.
 
 The menu shows which microphone the recording will hit — "Mikrofon: `<name>`" —
 so you see it before you start rather than afterwards. If access is denied, the
