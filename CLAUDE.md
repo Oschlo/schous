@@ -98,13 +98,19 @@ dependency for nothing.
 
 ## The backend contract
 
-The backend takes **exactly two arguments** (`transcribe.py:134-137`): a
-positional source path and `--speakers N`. There is no `--output`, `--model`,
+The backend takes a positional source path, `--speakers N`, `--work-dir`,
+`--output-dir` and `--progress {text,json}`. There is still no `--model` or
 `--language`. Everything else is controlled indirectly:
 
-- **Output location is the working directory.** `WORK_DIR`/`OUTPUT_DIR` are the
-  relative literals `"work"`/`"output"`, so `Process.currentDirectoryURL` *is*
-  the output-path API. See `TranscriptionJob.jobDirectory(for:)`.
+- **Output location is the working directory** — still, because that is what
+  this app does. `--work-dir`/`--output-dir` exist as of 2026-08-14 and default
+  to the relative literals `"work"`/`"output"`, so `Process.currentDirectoryURL`
+  keeps working unchanged. See `TranscriptionJob.jobDirectory(for:)`. Switching
+  to the flags would be a wash; the job dir has to exist either way.
+- **Steps 1–3 are cached in `work/`, and step 4 checkpoints.** Each finished
+  segment is appended to `work/<base>.partial.jsonl`, so a killed or stopped run
+  resumes rather than restarting. The file's presence means the last run did not
+  finish; it is deleted on success.
 - **Job dir is keyed on SHA-256 of the input path**, under
   `~/Library/Application Support/Schous/jobs/<hash>/`. Two reasons: the
   `work/` cache survives the user changing output folder, and the pristine
@@ -121,29 +127,36 @@ positional source path and `--speakers N`. There is no `--output`, `--model`,
   so a cached job runs fine with a dead token. Test token changes on a fresh
   job dir or you are testing nothing.
 
-## Progress parsing is text-scraping, and it is fragile
+## Progress is a JSON protocol now, not text-scraping
 
-There is no machine-readable protocol
-([backend #4](https://github.com/Oschlo/mac-local-transcribe-with-diarization/issues/4)).
-Two streams, parsed in `TranscriptionJob.parseStdout` / `parseStderr`:
+The app runs the backend with `--progress json`, and `TranscriptionJob.apply`
+switches on `event`. One object per line on stdout, nothing else there. Seven
+events, all observed from real runs: `step`, `progress` (steps 2 and 4),
+`diarized`, `language`, `resume`, `done`, `interrupted`.
 
-- **stdout:** `1/4 lyd…` … `4/4 transkriberer…`, `  N segmenter, M talere`,
-  `  taler i/n SPEAKER_xx: no`.
-- **stdout also:** pyannote's `ProgressHook()` is `rich`-based, and `rich` writes
-  to **stdout**, not stderr. Don't try to parse it — step 2 shows the raw line.
-- **stderr:** the tqdm bar from `transcribe_segments`.
+`Event` is a `Decodable` with all-optional fields, so **unknown keys and unknown
+events are ignored rather than fatal** — that is what lets the backend add
+fields without breaking an already-released app. `--selfcheck` asserts it.
 
-Two traps that already bit:
+Three things that are true of this protocol and cost time to find:
 
-1. **huggingface_hub prints its own tqdm bar to stderr**
-   (`Fetching 4 files: 100%|██| 4/4 [00:00<00:00, …]`). It matches any naive
-   `N/M [` regex and shows up as bogus 100% transcription progress. The parser
-   requires the literal `transkriberer:` desc — keep that guard.
-2. **tqdm uses `mininterval=10` when stderr is not a TTY** (`transcribe.py:96`),
-   so progress updates every 10 seconds under a `Pipe`. Not a bug in this app.
-   Don't add pty handling to work around it; fix backend #4 instead.
+1. **`completed` can exceed `total`.** pyannote's segmentation hook counts in
+   `batch_size` steps and overshoots the last chunk — measured `completed: 64`
+   of `total: 36`. `fraction` clamps to 1; don't remove that.
+2. **pyannote counts with numpy scalars, not Python ints**, and `json.dumps`
+   raises `TypeError` on `int64`. That killed a whole diarization run once. The
+   backend coerces at the hook and has `default=str` as a net under it — a
+   progress line must never be able to kill a job that has run for minutes.
+3. **stderr is not progress.** `huggingface_hub` still prints
+   `Fetching 4 files: 100%|██| 4/4 […]` there, and `sys.exit(message)` in the
+   backend also goes to stderr — that is where the `HF_TOKEN ikke satt` check
+   lives, not stdout. Anything non-JSON on stdout is logged, not parsed.
 
-Both pipes are split on `\n` **and** `\r` — tqdm repaints with `\r`.
+Both pipes are still split on `\n` **and** `\r`.
+
+The old parser scraped `1/4 lyd…`, `  N segmenter, M talere` and a tqdm bar
+whose `mininterval` was 10 s under a pipe. If you are reading a bug report older
+than 2026-08-14, that is what it is describing.
 
 ## Signals
 
@@ -151,12 +164,16 @@ Both pipes are split on `\n` **and** `\r` — tqdm repaints with `\r`.
   the loaded models in RAM and does not survive quitting the app.
 - **`SIGCONT` before `SIGTERM`.** A stopped process never handles the terminate
   signal — `stop()` resumes first, otherwise the job hangs forever in `T` state.
-- **Stopping during step 4 destroys all transcribed work.** The backend has no
-  signal handling and writes nothing until the very end
-  ([#3](https://github.com/Oschlo/mac-local-transcribe-with-diarization/issues/3),
-  [#5](https://github.com/Oschlo/mac-local-transcribe-with-diarization/issues/5)).
-  Steps 1–3 are disk-cached and resume free. The confirmation dialog exists
-  because of this; remove it only when those issues are fixed.
+- **Stopping is cheap now, and there is no confirmation dialog.** The backend
+  handles SIGTERM: it finishes the segment in flight, writes `.txt`/`.srt`/
+  `.json` from everything done so far, keeps `work/<base>.partial.jsonl`, and
+  exits **143** (130 for SIGINT). `finish()` treats those two codes as a normal
+  exit and loads the partial output — that is the `.stopped(n)` state, which is
+  deliberately not `.failed`. Don't re-add the "N of M segments will be lost"
+  dialog; it stopped being true on 2026-08-14.
+- **The signal lands at the end of the current segment, not immediately.**
+  Python defers the handler until it is back from `mlx_whisper.transcribe`. A
+  long segment is seconds. Don't add a timeout that assumes instant death.
 
 ## Menu bar recording (`Recorder.swift`)
 
@@ -330,6 +347,18 @@ limitation, not a UI nicety. `root()` follows merge chains with a hop limit;
   app som står og venter på en dialog. Bygg med «Schous Dev»-identiteten, og hvis
   et spørsmål likevel er ventet: si fra til brukeren og vent på svar før du
   måler, ikke gjett på en delay.
+- **Stabil DR er ikke det samme som stille installasjon.** Et Keychain-element
+  hvis ACL ble laget under en *tidligere* identitet — typisk fra ad-hoc-tida —
+  spør på nytt selv om dagens designated requirement er uendret. Målt: fc6b1b4
+  installert over forrige app med byte-identisk signatur kostet likevel ett
+  `HF_TOKEN`-spørsmål ved første oppstart. Det er engangs, men det må klikkes
+  **«Alltid tillat»**, ikke «Tillat»: den første skriver appen inn i ACL-en,
+  den andre gjelder bare den ene gangen.
+- **`prosess-status: S` beviser ingenting.** En app som står og venter på en
+  TCC- eller Keychain-dialog ser ut som en app som kjører helt fint. Dialogen
+  eies av `SecurityAgent`, så det er den som må sjekkes — og med
+  `pgrep -x SecurityAgent`, ikke `-f`: mønsteret står i din egen kommandolinje,
+  så `-f` matcher skallet som leter og gir alltid treff.
 - `open Schous.app --args …` only passes arguments on a **fresh** launch.
   If the app is already running, `open` just activates it and `--input` is
   silently ignored. `pkill -x Schous` first.
