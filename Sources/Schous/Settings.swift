@@ -10,8 +10,14 @@ final class AppSettings: ObservableObject {
     /// det som gjelder når det står på.
     nonisolated static let subprocessPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
+    /// Endres stien eller tokenet, gjelder ikke lenger svaret fra forrige sjekk.
+    /// Å la et grønt «✓ access ok» stå over et token som nettopp ble byttet er
+    /// verre enn ikke å ha svart: det er et svar på et spørsmål ingen stilte.
     @Published var backendPath: String {
-        didSet { UserDefaults.standard.set(backendPath, forKey: "backendPath") }
+        didSet {
+            UserDefaults.standard.set(backendPath, forKey: "backendPath")
+            checkResult = nil
+        }
     }
     @Published var checkResult: String?
     @Published var checking = false
@@ -31,6 +37,7 @@ final class AppSettings: ObservableObject {
             objectWillChange.send()
             loadedToken = newValue
             Keychain.set(newValue, for: "HF_TOKEN")
+            checkResult = nil
         }
     }
 
@@ -191,8 +198,7 @@ struct SettingsView: View {
         panel.canChooseFiles = false
         panel.prompt = "Velg"
         if panel.runModal() == .OK, let url = panel.url {
-            settings.backendPath = url.path
-            settings.checkResult = nil
+            settings.backendPath = url.path   // nullstiller checkResult selv
         }
     }
 }
