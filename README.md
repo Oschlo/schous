@@ -239,6 +239,26 @@ against the backend's own files:
   ~/Library/Application\ Support/Schous/jobs/<hash>/output/<name>
 ```
 
+## Contributing
+
+Issues and pull requests are welcome. Three things first:
+
+- **Read [CLAUDE.md](CLAUDE.md).** Most of what looks odd in here is odd for a
+  measured reason, and the measurement is written down next to the code.
+- **`--selfcheck` is mandatory** if you touch `Segment.swift`,
+  `TranscriptionJob.swift` or `Recorder.swift`. It covers the output format byte
+  for byte, the JSON progress parser and the silence-warning decisions.
+- **Three "simplifications" will be turned down**: making the microphone a
+  sub-device of the aggregate device, starting the microphone after the tap
+  rather than before it, and dropping the silence warning as redundant. All
+  three are measured dead ends, not preferences — CLAUDE.md has the numbers.
+
+Commit messages here are Norwegian, the backend's are English; each follows its
+own history.
+
+Security reports go through the **Report a vulnerability** button under the
+Security tab, not a public issue.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
