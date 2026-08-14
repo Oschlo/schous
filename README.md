@@ -1,28 +1,71 @@
 # Schous
 
-Minimal native macOS-frontend for
+Minimal native macOS frontend for
 [mac-local-transcribe-with-diarization](https://github.com/Oschlo/mac-local-transcribe-with-diarization).
 
-Dra inn en fil — eller ta opp systemlyden direkte fra menylinja — velg hvor
-resultatet skal ligge, følg fremdriften, og gi talerne navn etterpå. SwiftUI,
-ingen tredjepartsavhengigheter, ingen Xcode.
+Drop in a file — or record system audio straight from the menu bar — pick where
+the result goes, watch the progress, and name the speakers afterwards. SwiftUI,
+no third-party dependencies, no Xcode.
 
-Navnet kommer fra Schous plass på Grünerløkka. Siden det ikke røper hva appen gjør,
-setter `bundle.sh` Spotlight-søkeord på bundlen — søk på «transkribering» eller
-«transcribe» finner den.
+The name comes from Schous plass in Oslo. Since that gives away nothing about
+what the app does, `bundle.sh` puts Spotlight keywords on the bundle — searching
+for "transkribering" or "transcribe" finds it.
 
-## Installere
+> **The interface is in Norwegian.** Every string in the app is hard-coded
+> Norwegian; there is no localization. That is a deliberate choice for now — the
+> tool exists for Norwegian and Swedish recordings — but it is worth knowing
+> before you download 4 GB.
 
-Last ned `Schous.zip` fra [Releases](https://github.com/Oschlo/schous/releases),
-pakk ut, og legg `Schous.app` i `/Applications`.
+## Requirements
 
-Appen er signert med et lokalt sertifikat, ikke notarisert hos Apple. Laster du
-den ned i en nettleser, blir den satt i karantene og Gatekeeper nekter å åpne
-den — **høyreklikk → Åpne** slipper den igjennom med signaturen sjekket.
+- **Apple Silicon** Mac
+- **macOS 14.2 or later** — menu-bar recording uses a Core Audio process tap,
+  which does not exist before that
+- **`ffmpeg`** (`brew install ffmpeg`)
+- **`uv`** (`brew install uv`) — for the backend's Python environment
+- **A Hugging Face account** and a read token
+- **~4.2 GB of disk**, downloaded the first time you transcribe anything:
 
-`xattr -d com.apple.quarantine Schous.app` virker også, men slår av
-signatursjekken helt, ikke bare notariseringskravet. Bruker du den, sjekk først
-at du har den appen du tror:
+  | What | Size |
+  |---|---|
+  | `mlx-community/whisper-large-v3-mlx` | **2.9 GB** |
+  | `pyannote/speaker-diarization-community-1` | 31 MB |
+  | the backend's `.venv` (torch is nearly all of it) | **1.3 GB** |
+  | total | **~4.2 GB** |
+
+  The weights do **not** arrive during install — they come down during the
+  first run, in the middle of steps 2 and 4. The first job therefore looks like
+  it has hung when it is in fact downloading 2.9 GB.
+
+### How long a job takes
+
+Measured on an **Apple M5, macOS 26.6.1**, weights already downloaded, a 10m54s
+two-speaker Norwegian recording:
+
+```
+lyd 0s · diarization 4m37s · språk 5s · transkribering 1m17s
+```
+
+**6m02s for 10m54s of audio** — about 0.55× the length of the recording, and
+**76 % of it is diarization**. Don't extrapolate from transcription speed:
+diarization runs on CPU on purpose, so the ratio is not the one you'd guess.
+
+Running the same file again is much faster. Steps 1–3 are cached, so only
+transcription runs — 1m17s of the 6m02s above.
+
+## Install
+
+Download `Schous.zip` from
+[Releases](https://github.com/Oschlo/schous/releases), unzip, and put
+`Schous.app` in `/Applications`.
+
+The app is signed with a local certificate, not notarized with Apple. Download
+it in a browser and it gets quarantined and Gatekeeper refuses to open it —
+**right-click → Open** lets it through with the signature checked.
+
+`xattr -d com.apple.quarantine Schous.app` works too, but it turns the
+signature check off entirely, not just the notarization requirement. If you use
+it, check first that you have the app you think you have:
 
 ```zsh
 codesign --verify --strict -R \
@@ -30,33 +73,24 @@ codesign --verify --strict -R \
   Schous.app && echo ok
 ```
 
-Ingen utskrift utenom `ok` betyr at bundlen er hel og signert med samme
-sertifikat som forrige gang — som også er det mikrofon-, lydopptaks- og
-`HF_TOKEN`-tilgangene henger på, så en app som ikke passerer ville spurt om alt
-på nytt uansett.
+No output other than `ok` means the bundle is intact and signed with the same
+certificate as last time — which is also what the microphone, audio-capture and
+`HF_TOKEN` permissions hang on, so an app that fails this would have asked for
+all of them again anyway.
 
-Menylinja har **Se etter oppdateringer…**, og appen sjekker i tillegg stille én
-gang i døgnet ved oppstart. Finner den en nyere utgivelse, tilbyr menyen å åpne
-release-siden. Den installerer ikke selv; du bytter ut appen i /Applications.
+(That hash is ours. Build it yourself and you get a different one — see
+[CLAUDE.md](CLAUDE.md) under "Signering".)
 
-## Bygge
+The menu bar has **Se etter oppdateringer…**, and the app also checks quietly
+once a day at startup. If it finds a newer release, the menu offers to open the
+release page. It does not install anything itself; you replace the app in
+/Applications.
 
-```zsh
-./bundle.sh          # → Schous.app
-open Schous.app
-```
+## Setup
 
-Krever bare Command Line Tools (`xcode-select --install`). `swift build` alene holder
-under utvikling; `bundle.sh` lager .app-bundlen som trengs for Dock-ikon og vindusfokus.
-
-`./release.sh 0.2.0` tagger, bygger, og laster opp en release. Den må kjøres på
-maskinen som har «Schous Dev»-signeringsidentiteten — se CLAUDE.md.
-
-## Oppsett
-
-Appen gjør ikke transkriberingen selv — den driver
+The app does not transcribe anything itself — it drives
 [mac-local-transcribe-with-diarization](https://github.com/Oschlo/mac-local-transcribe-with-diarization)
-som subprosess. Den må være installert og virke fra terminal først:
+as a subprocess. That has to be installed and working from a terminal first:
 
 ```zsh
 git clone https://github.com/Oschlo/mac-local-transcribe-with-diarization.git
@@ -65,106 +99,136 @@ uv venv --python 3.12 .venv
 uv pip install --python .venv/bin/python -r requirements.txt
 ```
 
-Du må også godta lisensene for `pyannote/speaker-diarization-community-1` og
-`pyannote/segmentation-3.0` på Hugging Face med samme konto som tokenet tilhører.
+**Accept the licenses for `pyannote/speaker-diarization-community-1` and
+`pyannote/segmentation-3.0` on Hugging Face before the first run, with the same
+account the token belongs to.** Skip it and the token is still valid, so the
+job starts normally and then fails in step 2 with a download error that never
+mentions licenses. It is the most likely first failure anyone hits.
 
-Deretter, i appen — åpne Innstillinger (⌘,) og fyll inn:
+Then, in the app — open Settings (⌘,) and fill in:
 
-- **Backend** — mappen der `transcribe.py` og `.venv/` ligger. «Test» kjører
-  `transcribe.py --selfcheck` og bekrefter at venv-et fungerer.
-- **HF_TOKEN** — Hugging Face-token for pyannote-diarization. Lagres i Keychain.
+- **Backend** — the folder holding `transcribe.py` and `.venv/`.
+- **HF_TOKEN** — Hugging Face token for pyannote diarization. Stored in Keychain.
 
-`ffmpeg` må være installert (`brew install ffmpeg`). Appen setter selv
-`PATH=/opt/homebrew/bin:...`, siden en app startet fra Finder ikke arver Homebrew-PATH.
+Two buttons check the two halves:
 
-## Bruk
+- **Test backend** runs `transcribe.py --selfcheck`: `ffmpeg` on `PATH`, and
+  that `torch`, `pyannote.audio` and `mlx_whisper` actually import. Local, no
+  network, a few seconds.
+- **Test modelltilgang** asks Hugging Face whether the token is alive and
+  whether the model licenses are accepted by the account it belongs to. This is
+  the only check that uses the network.
 
-1. Dra en lyd- eller videofil inn i vinduet, eller velg den.
-2. Velg output-mappe. Oppgi antall talere hvis du vet det (tomt = automatisk).
-3. **Start transkribering.** Fremdriften viser steg 1–4 og segmentteller under steg 4.
-4. **Pause** fryser prosessen (SIGSTOP) og holder modellene i minnet.
-   **Stopp** avbryter — se advarselen under.
-5. Når den er ferdig: gi talerne navn, slå sammen ID-er som er samme person, og **Lagre**.
+## Use
 
-Skriver `<navn>.txt`, `<navn>.srt` og `<navn>.json` til valgt mappe.
+1. Drop an audio or video file into the window, or pick one.
+2. Choose the output folder. Give the speaker count if you know it (blank = automatic).
+3. **Start transkribering.** Progress shows steps 1–4, with a segment counter in
+   step 4 and per-substep progress in step 2.
+4. **Pause** freezes the process (SIGSTOP) and keeps the models in memory.
+   **Stopp** ends it — the segments transcribed so far are written out, and
+   starting again continues where it left off.
+5. When it finishes: name the speakers, merge IDs that are the same person, and
+   **Lagre**.
 
-## Opptak fra menylinjen
+Writes `<name>.txt`, `<name>.srt` and `<name>.json` to the folder you chose.
 
-Mikrofonikonet i menylinjen tar opp **systemlyd og mikrofon samtidig** — alt du
-hører fra video, nettmøter og telefon, pluss din egen stemme.
+## Recording from the menu bar
 
-1. **Start opptak.** Ikonet blir en opptaksring, og menyen viser en teller.
-2. **Stopp opptak.** De to kildene mikses til én monofil,
-   `Opptak-2026-08-10-1432.m4a`, i samme mappe som er valgt under «Lagre i».
-3. Vinduet løftes med opptaket forhåndsvalgt. Derfra er det vanlig
-   transkribering — du velger selv om og når.
+The microphone icon in the menu bar records **system audio and the microphone at
+the same time** — everything you hear from video, web meetings and phone calls,
+plus your own voice.
 
-Menyen viser hvilken mikrofon opptaket treffer — «Mikrofon: `<navn>`» — så du
-ser det før du starter, ikke etterpå. Er tilgangen avslått, sier raden det, med
-veien til å fikse det.
+1. **Start opptak.** The icon becomes a recording ring and the menu shows a timer.
+2. **Stopp opptak.** The two sources are mixed to one mono file,
+   `Opptak-2026-08-10-1432.m4a`, in the same folder chosen under "Lagre i".
+3. The window comes forward with the recording preselected. From there it is
+   ordinary transcription — you decide whether and when.
 
-Første gang spør macOS om mikrofontilgang. Sier du nei, tas systemlyden opp
-alene, som fortsatt er et brukbart opptak av et møte du bare lytter til.
-**Skjermopptak-tillatelse trengs ikke** — systemlyden hentes med en Core
-Audio-tapp, ikke med ScreenCaptureKit.
+The menu shows which microphone the recording will hit — "Mikrofon: `<name>`" —
+so you see it before you start rather than afterwards. If access is denied, the
+row says so, with the way to fix it.
 
-Du kan bytte lydutgang midt i et opptak — tappen henter lyden fra prosessene,
-ikke fra enheten, så opptaket går uforstyrret videre.
+The first time, macOS asks for microphone access. Say no and system audio is
+recorded on its own, which is still a usable recording of a meeting you are only
+listening to. **Screen Recording permission is not needed** — system audio comes
+from a Core Audio tap, not from ScreenCaptureKit.
 
-En fil kan også forhåndsvelges ved oppstart, som er praktisk for testing:
+You can change audio output device mid-recording; the tap takes audio from the
+processes, not from the device, so the recording carries on undisturbed.
+
+A file can also be preselected at launch, which is handy for testing:
 
 ```zsh
-open Schous.app --args --input ~/Filmer/opptak.mp4
+open Schous.app --args --input ~/Movies/recording.mp4
 ```
 
-`open` sender bare argumenter til en *fersk* oppstart — er appen allerede i gang,
-blir den bare aktivert og `--input` ignorert.
+`open` only passes arguments to a *fresh* launch — if the app is already
+running, it is merely activated and `--input` is ignored.
 
-## Hvordan det henger sammen
+## How it fits together
 
-Appen kjører backend-en som subprosess med arbeidsmappe satt til en jobbmappe under
-`~/Library/Application Support/Schous/jobs/<hash av inputsti>/`. Backend skriver
-`work/` (mellomresultater) og `output/` (fasit med `SPEAKER_00`-labels) dit.
+The app runs the backend as a subprocess with the working directory set to a job
+folder under `~/Library/Application Support/Schous/jobs/<hash of input path>/`.
+The backend writes `work/` (intermediates) and `output/` (ground truth, with
+`SPEAKER_00` labels) there.
 
-Fasiten røres aldri av navngivingen — omdøping og sammenslåing leses fra `speakers.json`
-i jobbmappen og påføres først når filene skrives til din output-mappe. Du kan endre navn
-så mange ganger du vil uten å miste de opprinnelige labelene.
+That ground truth is never touched by naming — renames and merges are read from
+`speakers.json` in the job folder and applied only when files are written to
+your output folder. You can rename as many times as you like without losing the
+original labels.
 
-Jobbmappen er nøklet på inputstien, så `work/`-cachen overlever selv om du bytter
-output-mappe. En avbrutt kjøring gjenopptas på steg 4 fordi lyduttrekk, diarization og
-språkdeteksjon allerede ligger cachet.
+The job folder is keyed on the input path, so the `work/` cache survives you
+changing output folder. An interrupted run resumes: steps 1–3 are cached, and
+step 4 keeps every finished segment in `work/<name>.partial.jsonl` as it goes.
 
-## Begrensninger
+Progress is read from the backend's `--progress json` stream — one JSON object
+per line — rather than scraped out of human-readable output.
 
-Disse kommer fra backend-en og er filed som issues der:
+## Limitations
 
-- **Stopp under steg 4 mister alt transkribert arbeid.** Backend skriver ingenting før
-  den er ferdig ([#3](https://github.com/Oschlo/mac-local-transcribe-with-diarization/issues/3),
-  [#5](https://github.com/Oschlo/mac-local-transcribe-with-diarization/issues/5)).
-  Appen advarer før den dreper prosessen.
-- **Fremdrift oppdateres bare hvert 10. sekund under steg 4.** tqdm bruker
-  `mininterval=10` når stderr ikke er en terminal
-  ([#4](https://github.com/Oschlo/mac-local-transcribe-with-diarization/issues/4)).
-- **Steg 2 viser rå tekst.** pyannotes fremdriftsbar skriver til stdout og lar seg ikke
-  parse pålitelig — samme issue.
-- **ffmpeg-feil er lite informative** ([#6](https://github.com/Oschlo/mac-local-transcribe-with-diarization/issues/6)).
-- Ingen modell- eller språkvalg — backend eksponerer det ikke som flagg.
-- Én fil om gangen.
+- No model or language choice — the backend does not expose them as flags.
+- One file at a time.
+- Diarization sometimes splits one person into several `SPEAKER_xx` IDs. That is
+  why the speaker editor has "merge" and not just renaming.
 
-Diarization deler av og til én person i flere `SPEAKER_xx`-ID-er. Det er derfor
-taler-editoren har «slå sammen» og ikke bare omdøping.
+## Build
 
-## Egentest
+```zsh
+./bundle.sh          # → Schous.app
+open Schous.app
+```
+
+Only Command Line Tools are required (`xcode-select --install`). `swift build`
+alone is fine during development; `bundle.sh` produces the .app bundle needed
+for the Dock icon and window focus.
+
+`./release.sh 0.2.0` tags, builds and uploads a release. It has to run on the
+machine holding the "Schous Dev" signing identity — see [CLAUDE.md](CLAUDE.md).
+Without that certificate `bundle.sh` falls back to an ad-hoc signature and warns;
+the app runs perfectly well that way, the only cost being that TCC permissions
+reset on every rebuild, which CLAUDE.md explains in detail.
+
+## Self-check
 
 ```zsh
 .build/debug/Schous --selfcheck
 ```
 
-Kjører parserne mot ekte backend-output-linjer og sjekker tidsstempel- og SRT-format.
-Med en sti til en ferdig kjøring sammenlignes output byte for byte mot backend-ens egne
-filer:
+Runs the parsers against real backend output lines and checks timestamp and SRT
+formatting. Given a path to a finished run, it compares output byte for byte
+against the backend's own files:
 
 ```zsh
 .build/debug/Schous --selfcheck \
-  ~/Library/Application\ Support/Schous/jobs/<hash>/output/<navn>
+  ~/Library/Application\ Support/Schous/jobs/<hash>/output/<name>
 ```
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+The app bundles no third-party code: `Package.swift` has no dependencies, and
+everything comes from SwiftUI, AppKit and Core Audio in the Command Line Tools
+SDK. It does not bundle `ffmpeg` or the backend either — both are called as
+subprocesses against what you installed yourself.
