@@ -91,7 +91,11 @@ final class AppSettings: ObservableObject {
         p.currentDirectoryURL = cwd
         var env = ProcessInfo.processInfo.environment
         env["PATH"] = subprocessPATH
-        if let token, !token.isEmpty { env["HF_TOKEN"] = token }
+        // Et token på nil betyr «denne sjekken bryr seg ikke». Er det tomt, skal
+        // det være tomt: arves HF_TOKEN fra skallet appen ble startet fra, ville
+        // «Test modelltilgang» blitt grønn på et token Keychain ikke har — og
+        // neste start fra Finder feilet.
+        if let token { env["HF_TOKEN"] = token.isEmpty ? nil : token }
         p.environment = env
         let pipe = Pipe()
         p.standardOutput = pipe
@@ -155,7 +159,6 @@ struct SettingsView: View {
                     Button("Test modelltilgang", action: settings.runAccessCheck)
                     if settings.checking { ProgressView().controlSize(.small) }
                 }
-                .disabled(settings.checking)
                 if let r = settings.checkResult {
                     Text(r).font(.caption).textSelection(.enabled)
                         .foregroundStyle(r.hasPrefix("✓") ? .green : .red)
@@ -173,6 +176,10 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
+        // Hele skjemaet, ikke bare knappene: sjekken kjører på stien og tokenet
+        // slik de var da den startet, så et felt som kan endres mens den går,
+        // gir et grønt svar på noe som aldri ble sjekket.
+        .disabled(settings.checking)
         .formStyle(.grouped)
         .frame(width: 480)
         .padding(.vertical, 8)
