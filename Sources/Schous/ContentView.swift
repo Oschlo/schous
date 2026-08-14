@@ -39,6 +39,15 @@ struct ContentView: View {
 
             // Menylinjemenyen lukkes av selve stopp-klikket, og miksingen blir
             // ferdig først etterpå — sto feilen bare der, ville ingen sett den.
+            // Varselet under opptak vises begge steder: menyen er der man ser
+            // det raskest, vinduet er der det fortsatt står hvis menyen var lukket.
+            if let warning = recorder.liveWarning {
+                Label(warning, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             if let error = recorder.errorMessage {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)

@@ -65,8 +65,19 @@ private struct MenuBarContent: View {
             // Etter stopp: løft vinduet, der opptaket nå ligger forhåndsvalgt.
             if wasRecording { showWindow() }
         }
+        if recorder.isRecording {
+            // Nivået mens det pågår. Et dødt spor oppdaget etter at møtet er
+            // over er en obduksjon; dette er tidsnok til å gjøre noe.
+            Text("System   \(meter(recorder.systemLevel))")
+            if recorder.inputLabel != nil {
+                Text("Mikrofon \(meter(recorder.micLevel))")
+            }
+        }
         if let mic = recorder.inputLabel {
             Text("Mikrofon: \(mic)")
+        }
+        if let warning = recorder.liveWarning {
+            Text("⚠︎ \(warning)")
         }
         if let error = recorder.errorMessage {
             Text(error)
@@ -83,6 +94,15 @@ private struct MenuBarContent: View {
         }
         Divider()
         Button("Avslutt Schous") { NSApplication.shared.terminate(nil) }
+    }
+
+    /// Åtte blokker. En meny tar bare tekst — ingen ProgressView, ingen Canvas —
+    /// og en tekstmåler er lesbar nok til å svare på det eneste spørsmålet som
+    /// betyr noe: kommer det lyd inn her?
+    private func meter(_ level: Float) -> String {
+        let filled = Int((level * 8).rounded())
+        return String(repeating: "▮", count: filled)
+            + String(repeating: "▯", count: 8 - filled)
     }
 
     private var clock: String {
