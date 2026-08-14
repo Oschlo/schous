@@ -77,6 +77,16 @@ PUSHED=1
 # release ligget ute uten Schous.zip — README-en peker rett på den. Som utkast er
 # den usynlig til arkivet er oppe, og trap-en rydder den bort med `--cleanup-tag`.
 gh release create "v$VERSION" Schous.zip --generate-notes --draft
-gh release edit "v$VERSION" --draft=false >/dev/null
 rm -f Schous.zip
-echo "ok: v$VERSION lagt ut"
+
+# DRAFT=1 lar utkastet stå. Det trengs fordi README-en peker på Releases-fanen: i
+# sekundet repoet blir offentlig er den lenka død hvis fanen er tom, og en release
+# kan ikke være offentlig før repoet er det. Utkast kan derimot lages mens repoet
+# ennå er privat, så rekkefølgen er utkast → flipp → publiser, og da finnes det
+# aldri et vindu der lenka er offentlig og feil.
+if [[ -n "${DRAFT:-}" ]]; then
+  echo "ok: v$VERSION ligger som utkast — publiser med: gh release edit v$VERSION --draft=false"
+else
+  gh release edit "v$VERSION" --draft=false >/dev/null
+  echo "ok: v$VERSION lagt ut"
+fi
