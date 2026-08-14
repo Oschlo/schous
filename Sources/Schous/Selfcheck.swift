@@ -159,28 +159,37 @@ private func recorderSelfcheck() {
     // Stillhetsvarselet. Hele verdien ligger i at det *ikke* slår ut når
     // stillheten er forventet — et varsel som ofte tar feil blir ignorert den
     // dagen det gjelder.
-    check(Recorder.systemWarning(silentFor: 30, somethingIsPlaying: false) == nil,
-          "stille tapp uten avspilling skal tie")
-    check(Recorder.systemWarning(silentFor: 30, somethingIsPlaying: true) != nil,
-          "stille tapp mens noe spilles av er nektet tilgang, og skal si fra")
+    check(Recorder.systemWarning(silentFor: 30, outputIsRunning: false) == nil,
+          "stille tapp uten en eneste utgang i gang skal tie")
+    check(Recorder.systemWarning(silentFor: 30, outputIsRunning: true) != nil,
+          "stille tapp mens en utgang er i gang er verdt å nevne")
     check(Recorder.systemWarning(silentFor: Recorder.systemGrace - 0.25,
-                                 somethingIsPlaying: true) == nil,
+                                 outputIsRunning: true) == nil,
           "ikke mas før nådetiden er ute")
+    // `outputIsRunning` beviser ikke at det spilles av lyd — Chrome står på hele
+    // tida. Varselet skal derfor stille spørsmålet, ikke felle dommen.
+    check(Recorder.systemWarning(silentFor: 30, outputIsRunning: true)?
+            .contains("Spilles det av lyd nå") == true,
+          "systemvarselet skal ikke påstå at tillatelsen mangler")
 
-    check(Recorder.micWarning(silentFor: 60, hasMic: false) == nil,
+    check(Recorder.micWarning(silentFor: 60, mic: .off) == nil,
           "uten mikrofon er stillhet på mikrofonsporet ikke en feil")
-    check(Recorder.micWarning(silentFor: 60, hasMic: true) != nil,
+    check(Recorder.micWarning(silentFor: 60, mic: .live) != nil,
           "en mikrofon som ikke leverer noe skal si fra")
-    check(Recorder.micWarning(silentFor: Recorder.micGrace - 0.25, hasMic: true) == nil,
+    check(Recorder.micWarning(silentFor: Recorder.micGrace - 0.25, mic: .live) == nil,
           "ikke mas før nådetiden er ute")
+    // Tilgang gitt, men opptakeren startet ikke: før dette så det ut som `.off`,
+    // og da tidde varselet resten av opptaket mens måleren sto på null.
+    check(Recorder.micWarning(silentFor: 0, mic: .failed) != nil,
+          "en mikrofon som ikke startet skal si fra med en gang")
 
     // Svikter begge, skal begge stå der — ikke bare den som kom først.
-    let begge = Recorder.warning(systemSilentFor: 30, somethingIsPlaying: true,
-                                 micSilentFor: 60, hasMic: true) ?? ""
+    let begge = Recorder.warning(systemSilentFor: 30, outputIsRunning: true,
+                                 micSilentFor: 60, mic: .live) ?? ""
     check(begge.contains("Systemlyden") && begge.contains("Mikrofonen"),
           "to døde kilder skal gi to varsler: \(begge)")
-    check(Recorder.warning(systemSilentFor: 30, somethingIsPlaying: false,
-                           micSilentFor: 0, hasMic: true) == nil,
+    check(Recorder.warning(systemSilentFor: 30, outputIsRunning: false,
+                           micSilentFor: 0, mic: .live) == nil,
           "ingen døde kilder, ingen varsel")
 
     // Måleren: gulvet er -60 dB, taket 0.

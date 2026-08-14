@@ -208,6 +208,26 @@ with no key anywhere. Any measurement of the tap has to be `open`ed as a bundle,
 never run from the shell, or it tests Terminal's permissions instead of the
 app's.
 
+**Nothing in HAL tells you whether audio is audible, so the silence warning asks
+instead of asserting.** A tap with no audio-capture grant and a tap with nothing
+playing both deliver pure zeros, and the only public signal to separate them is
+`kAudioProcessPropertyIsRunningOutput` — which reports an *open output IOProc*,
+not sound. Measured on macOS 26.6.1, one reading per second:
+
+```
+idle machine        8/8 readings   n=1   Google Chrome Helper
+with afplay running                n=2   Google Chrome Helper, afplay
+```
+
+afplay appears and disappears with the sound; Chrome sits at `true` permanently
+because a browser keeps the output path open. So the property is a *necessary*
+condition for the warning — nothing running means tap silence is certainly
+innocent — and never a sufficient one. `systemWarning` therefore states what it
+observed and leaves the permission as a conditional, because the person in the
+room knows whether anything was playing and the code cannot. There is no
+per-process level property and `kTCCServiceAudioCapture` cannot be queried; don't
+go looking again.
+
 Changing the default output device mid-recording is harmless — measured at
 338/376/375 callbacks with identical peak before the switch, after it, and after
 switching back. The tap captures process output, not a device; the output device
