@@ -46,6 +46,7 @@ final class Recorder: ObservableObject {
     private var destination: URL?
     private var ticker: Task<Void, Never>?
     private var heardSystemSound = false
+    private var micStatus: MicStatus = .off
     private var systemSilent: TimeInterval = 0
     private var micSilent: TimeInterval = 0
 
@@ -73,6 +74,7 @@ final class Recorder: ObservableObject {
         liveWarning = nil
         systemSilent = 0; micSilent = 0
         systemLevel = 0; micLevel = 0
+        micStatus = .off
         Task {
             // Første gang gir dette systemets mikrofon-prompt. Nektes den, tas
             // systemlyden opp alene — det er fortsatt et brukbart opptak.
@@ -116,9 +118,14 @@ final class Recorder: ObservableObject {
         systemLevel = 0; micLevel = 0
         // Info.plist-nøkkelen utløser spørsmålet, men svaret kan bli nei — og da er
         // tappen like taus som før nøkkelen fantes, uten en eneste feilkode.
+        // Rene nuller kan like gjerne bety at ingenting ble spilt av, og det vet
+        // bare den som satt der. Derfor står det som et spørsmål til brukeren og
+        // ikke som en påstand om tillatelsen: et rent mikrofonopptak treffer denne
+        // grenen hver eneste gang.
         if !heardSystemSound {
-            errorMessage = "systemlyden var helt stille — gi Schous tilgang under "
-                + "Personvern og sikkerhet → Lydopptak, ellers tas bare mikrofonen opp"
+            errorMessage = "systemlyden var helt stille i hele opptaket. Ble det spilt "
+                + "av lyd, mangler Schous tilgang under Personvern og sikkerhet → "
+                + "Lydopptak, og da kom bare mikrofonen med"
         }
         guard let system, let destination else { return }
 
@@ -169,37 +176,58 @@ final class Recorder: ObservableObject {
 
         // HAL-oppslaget gjøres bare når vi allerede er i ferd med å klage.
         liveWarning = Self.warning(systemSilentFor: systemSilent,
-                                   somethingIsPlaying: systemSilent >= Self.systemGrace
-                                       && anyProcessIsPlayingOutput(),
-                                   micSilentFor: micSilent, hasMic: mic != nil)
+                                   outputIsRunning: systemSilent >= Self.systemGrace
+                                       && anyProcessHasOutputRunning(),
+                                   micSilentFor: micSilent, mic: micStatus)
     }
+
+    /// Hva mikrofonsporet er, som er tre ting og ikke to. `.off` er brukerens
+    /// valg — nektet tilgang, og opptaket er ment å være uten. `.failed` er en
+    /// feil: tilgangen er gitt, men opptakeren startet ikke, og den forskjellen
+    /// forsvant da begge var `mic == nil`.
+    enum MicStatus { case off, failed, live }
 
     /// Begge kildene kan svikte i samme opptak, og da er begge verdt å vite om.
     /// En `??` her lot systemvarselet skygge for mikrofonvarselet resten av
     /// opptaket — brukeren rettet det ene og mistet det andre uansett.
-    static func warning(systemSilentFor: TimeInterval, somethingIsPlaying: Bool,
-                        micSilentFor: TimeInterval, hasMic: Bool) -> String? {
-        let both = [systemWarning(silentFor: systemSilentFor, somethingIsPlaying: somethingIsPlaying),
-                    micWarning(silentFor: micSilentFor, hasMic: hasMic)].compactMap { $0 }
+    static func warning(systemSilentFor: TimeInterval, outputIsRunning: Bool,
+                        micSilentFor: TimeInterval, mic: MicStatus) -> String? {
+        let both = [systemWarning(silentFor: systemSilentFor, outputIsRunning: outputIsRunning),
+                    micWarning(silentFor: micSilentFor, mic: mic)].compactMap { $0 }
         return both.isEmpty ? nil : both.joined(separator: " ")
     }
 
     /// Rene avgjørelser, skilt ut fordi det er nøyaktig her et varsel blir
     /// ubrukelig: ett som ofte tar feil, blir ignorert den dagen det gjelder.
     /// `--selfcheck` dekker begge.
-    static func systemWarning(silentFor: TimeInterval, somethingIsPlaying: Bool) -> String? {
-        guard silentFor >= systemGrace, somethingIsPlaying else { return nil }
+    ///
+    /// `outputIsRunning` er ikke det samme som at det faktisk spilles av lyd — se
+    /// `anyProcessHasOutputRunning()`. Derfor står tillatelsen som en betingelse
+    /// og ikke som en diagnose: den som leser varselet vet om det gikk lyd, og
+    /// det er den ene opplysningen koden ikke kan skaffe seg.
+    static func systemWarning(silentFor: TimeInterval, outputIsRunning: Bool) -> String? {
+        guard silentFor >= systemGrace, outputIsRunning else { return nil }
         // Ingen påstand om at mikrofonen virker: den kan være død samtidig, og
         // da står varslene ved siden av hverandre.
-        return "Systemlyden er stille selv om noe spilles av — gi Schous tilgang "
-            + "under Personvern og sikkerhet → Lydopptak. Slik det står nå havner "
-            + "ikke systemlyden i opptaket."
+        return "Systemlyden er helt stille. Spilles det av lyd nå, mangler Schous "
+            + "tilgang under Personvern og sikkerhet → Lydopptak, og da havner den "
+            + "ikke i opptaket."
     }
 
-    static func micWarning(silentFor: TimeInterval, hasMic: Bool) -> String? {
-        guard hasMic, silentFor >= micGrace else { return nil }
-        return "Mikrofonen leverer ingenting — sjekk at riktig inngang er valgt "
-            + "og at den ikke er fysisk dempet."
+    static func micWarning(silentFor: TimeInterval, mic: MicStatus) -> String? {
+        switch mic {
+        case .off:
+            return nil
+        case .failed:
+            // Sier fra med en gang, uten å vente på `micGrace`: det er ingenting
+            // å vente på når opptakeren aldri kom i gang.
+            return "Mikrofonen ble ikke startet, selv om tilgangen er gitt — dette "
+                + "opptaket får ikke noe mikrofonspor."
+        case .live:
+            guard silentFor >= micGrace else { return nil }
+            return "Mikrofonen leverer ingenting — sjekk at riktig inngang er valgt "
+                + "og at den ikke er fysisk dempet."
+        }
     }
 
     /// dB → 0…1 for måleren. -60 dB er gulvet; under det er det uansett stillhet.
@@ -230,8 +258,16 @@ final class Recorder: ObservableObject {
                 AVNumberOfChannelsKey: 1,
             ])
             mic?.isMeteringEnabled = true   // må settes før record(), ellers måler den ingenting
-            // Feiler mikrofonen, tas systemlyden opp alene — fortsatt et brukbart opptak.
-            if mic?.record() != true { mic = nil }
+            // Feiler mikrofonen, tas systemlyden opp alene — fortsatt et brukbart
+            // opptak, men ikke det brukeren ba om. Tilgangen er jo gitt, så dette
+            // er ikke et valg som er tatt; det skilles fra `.off` og sier fra.
+            if mic?.record() == true {
+                micStatus = .live
+            } else {
+                mic = nil
+                micStatus = .failed
+                inputLabel = "kunne ikke startes"
+            }
         }
 
         // Aggregatet trenger en klokkekilde; utgangsenheten er den naturlige.
@@ -634,16 +670,29 @@ func defaultInputLabel() -> String? {
     return name as String
 }
 
-/// Sender noen *annen* prosess lyd ut akkurat nå?
+/// Har noen *annen* prosess en utgangs-IOProc i gang?
 ///
-/// Dette er hele grunnen til at stillhetsvarselet kan stoles på. Rene nuller fra
-/// tappen har to årsaker koden ikke kan skille på egen hånd — nektet
-/// lydopptakstillatelse, eller at ingenting faktisk ble spilt av — og et varsel
-/// som ikke skiller dem, slår ut på hvert eneste rene mikrofonopptak.
+/// Merk hva det ikke er: et svar på om det faktisk kommer lyd ut. Egenskapen sier
+/// at prosessen har åpnet utgangsveien, ikke at den sender noe gjennom den. Målt
+/// på macOS 26.6.1, én avlesning i sekundet:
 ///
-/// `kAudioHardwarePropertyProcessObjectList` + `kAudioProcessPropertyIsRunningOutput`
-/// (macOS 14.2+, samme generasjon som tappen) svarer sikkert i stedet for å gjette.
-@MainActor func anyProcessIsPlayingOutput() -> Bool {
+/// ```
+/// helt stille maskin      8/8 avlesninger  n=1  Google Chrome Helper
+/// med afplay i bakgrunnen                  n=2  Google Chrome Helper, afplay
+/// ```
+///
+/// Chrome står altså på hele tida uten at noe spilles av, mens afplay dukker opp
+/// og forsvinner med lyden. Egenskapen følger ekte avspilling for prosesser som
+/// åpner utgangen når de trenger den, og er blind for nettlesere og møteklienter,
+/// som holder den åpen. Det gjør den til en *nødvendig* betingelse for
+/// stillhetsvarselet og ikke en tilstrekkelig en — er ingenting i gang, er tapp-
+/// stillhet garantert uskyldig, men det motsatte følger ikke. Derfor påstår
+/// `systemWarning` ingenting om tillatelsen; den spør brukeren, som vet.
+///
+/// Noe bedre finnes ikke i HAL: det er ingen offentlig egenskap for nivå eller
+/// hørbarhet per prosess, og TCC-status for `kTCCServiceAudioCapture` kan ikke
+/// leses. Tappen selv gir nuller i begge tilfeller — det er hele problemet.
+@MainActor func anyProcessHasOutputRunning() -> Bool {
     let system = AudioObjectID(kAudioObjectSystemObject)
     var addr = address(kAudioHardwarePropertyProcessObjectList)
     var size = UInt32(0)
