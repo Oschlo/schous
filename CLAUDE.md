@@ -333,8 +333,29 @@ clips) — that is the headset's own AGC, upstream of anything here. And the
 system side is not a property of this app at all: the tap sits **after** the
 source app's own volume control, so moving the slider in the player moved the
 system track 17.6 dB (−50.2 → −32.6 LUFS) without touching the macOS volume.
-Whether the macOS output knob moves it too is untested; the tap is a process
-tap, so it should sit before that one.
+
+**But it sits *before* the macOS output volume and before mute** — measured on
+macOS 26.6.1, one 440 Hz tone at a fixed source level, built-in speakers, reading
+the app's own System meter (7.5 dB per block) out of the menu:
+
+```
+systemvolum   50 · 25 · 12 · 6 · 50      ▮▮▮▮▯▯▯▯ hele veien, to avlesninger hver
+mutet, systemvolum 40                    ▮▮▮▮▯▯▯▯
+kildevolum 1.0 → 0.1 → 1.0               ▮▮▮▮ → ▮ → ▮▮▮▮
+ingen avspilling                         ▯▯▯▯▯▯▯▯
+```
+
+**The last two lines are the point, not the first.** A constant meter is also
+what a *frozen* meter looks like, so the null result means nothing without a
+control that has to move: the source volume is already known to sit ahead of the
+tap, and a −20 dB change there dropped three blocks in the same recording. So the
+knob-sweep had demonstrated sensitivity to a change of that size and still showed
+none. Any future measurement of this shape needs the same control.
+
+The consequence is that **the recording level does not depend on how loud the
+user was listening** — a muted machine still captures the far end at full level,
+and turning the volume down to save your ears does not quietly ruin the
+transcription. What does move it is the slider inside the source app.
 
 A fixed correction would therefore improve one configuration and wreck the
 other. The level meters in the menu bar are the answer instead: they show the
