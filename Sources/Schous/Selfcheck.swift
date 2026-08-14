@@ -11,37 +11,52 @@ func runSelfcheckAndExit() -> Never {
 
     let job = TranscriptionJob()
 
-    job.parseStdout("1/4 lyd…")
+    job.parseStdout(#"{"event": "step", "step": 1, "name": "lyd"}"#)
     check(job.step == 1, "steg 1, fikk \(job.step)")
 
-    job.parseStdout("2/4 diarization…")
-    job.parseStdout("  509 segmenter, 3 talere")
-    check(job.step == 2 && job.total == 509 && job.speakerCount == 3,
-          "steg 2: \(job.step) \(job.total) \(job.speakerCount)")
+    job.parseStdout(#"{"event": "step", "step": 2, "name": "diarization"}"#)
+    job.parseStdout(#"{"event": "progress", "step": 2, "sub": "segmentation", "completed": 9, "total": 36}"#)
+    check(job.step == 2 && job.done == 9 && job.total == 36 && job.detail == "segmentation",
+          "steg 2 understeg: \(job.done)/\(job.total) \(job.detail)")
+    check(job.fraction.map { abs($0 - 9.0 / 36.0) < 1e-9 } == true, "fraction i steg 2")
 
-    job.parseStdout("3/4 språk per taler…")
-    job.parseStdout("  taler 1/3 SPEAKER_00: sv  (\"Väldigt många människor...\")")
+    // pyannote teller forbi taket på siste chunk — målt, ikke hypotetisk.
+    job.parseStdout(#"{"event": "progress", "step": 2, "sub": "segmentation", "completed": 64, "total": 36}"#)
+    check(job.fraction == 1, "fraction over 1: \(String(describing: job.fraction))")
+
+    job.parseStdout(#"{"event": "diarized", "segments": 509, "speakers": 3}"#)
+    check(job.total == 509 && job.speakerCount == 3,
+          "diarized: \(job.total) \(job.speakerCount)")
+
+    job.parseStdout(#"{"event": "step", "step": 3, "name": "språk per taler"}"#)
+    job.parseStdout(#"{"event": "language", "completed": 1, "total": 3, "speaker": "SPEAKER_00", "language": "sv"}"#)
     check(job.step == 3 && job.detail == "taler 1/3 — SPEAKER_00: sv", "steg 3: \(job.detail)")
 
-    job.parseStdout("4/4 transkriberer…")
+    job.parseStdout(#"{"event": "step", "step": 4, "name": "transkriberer"}"#)
     check(job.step == 4, "steg 4, fikk \(job.step)")
 
-    // tqdm på stderr, non-tty-varianten
-    job.parseStderr("  transkriberer:  42%|████▏     | 214/509 [08:31<11:44,  2.39s/seg, SPEAKER_00 no]")
-    check(job.done == 214 && job.total == 509 && job.eta == "11:44",
-          "tqdm: \(job.done)/\(job.total) eta=\(job.eta)")
-    check(job.detail == "SPEAKER_00 (no)", "tqdm postfix: \(job.detail)")
-    check(job.fraction.map { abs($0 - 214.0 / 509.0) < 1e-9 } == true, "fraction")
+    job.parseStdout(#"{"event": "progress", "step": 4, "completed": 214, "total": 509, "speaker": "SPEAKER_00", "language": "no"}"#)
+    check(job.done == 214 && job.total == 509, "steg 4: \(job.done)/\(job.total)")
+    check(job.detail == "SPEAKER_00 (no)", "steg 4 detalj: \(job.detail)")
+    check(job.fraction.map { abs($0 - 214.0 / 509.0) < 1e-9 } == true, "fraction i steg 4")
 
-    // tqdm helt i starten: ukjent ETA
-    job.parseStderr("  transkriberer:   0%|          | 0/509 [00:00<?, ?seg/s]")
-    check(job.done == 0 && job.eta == "?", "tqdm start: done=\(job.done) eta=\(job.eta)")
+    // Ukjente felt og ukjente hendelser skal ignoreres, ikke velte parseren —
+    // ellers kan ikke backend legge til noe uten å knekke en utgitt app.
+    job.parseStdout(#"{"event": "noe-nytt", "step": 4, "hva": 1}"#)
+    job.parseStdout(#"{"event": "progress", "step": 4, "completed": 215, "total": 509, "speaker": "SPEAKER_00", "language": "no", "nytt_felt": true}"#)
+    check(job.done == 215, "ukjent felt forstyrret: \(job.done)")
 
-    // huggingface sin egen tqdm-bar på stderr må ignoreres, ikke leses som fremdrift
+    // Gjenopptagelse etter et avbrudd.
+    job.parseStdout(#"{"event": "resume", "completed": 18, "total": 116}"#)
+    check(job.detail == "gjenopptar 18 ferdige segmenter", "resume: \(job.detail)")
+
+    // Fremdrift kommer nå bare fra stdout. huggingface_hub skriver sin egen
+    // tqdm-bar til stderr, og den skal ikke kunne bevege noe som helst.
     job.parseStderr("Fetching 4 files: 100%|██████████| 4/4 [00:00<00:00, 2035.58it/s]")
-    check(job.done == 0 && job.total == 509, "hf-bar forurenset: \(job.done)/\(job.total)")
+    check(job.done == 215 && job.total == 509, "stderr forurenset: \(job.done)/\(job.total)")
 
-    job.parseStdout("HF_TOKEN ikke satt. export HF_TOKEN=hf_...")
+    // sys.exit(melding) i backend går til stderr, ikke stdout.
+    job.parseStderr("HF_TOKEN ikke satt. export HF_TOKEN=hf_...")
     check(job.state == .failed("HF_TOKEN mangler. Legg den inn i Innstillinger."), "hf-token-feil")
 
     // Output-formatering mot backendens write_outputs

@@ -3,6 +3,7 @@ import CryptoKit
 
 enum JobState: Equatable {
     case idle, running, paused, done
+    case stopped(Int)       // brukeren trykket Stopp; N segmenter er skrevet og kan gjenopptas
     case failed(String)
 }
 
@@ -20,18 +21,20 @@ final class TranscriptionJob: ObservableObject {
     @Published var log: [String] = []
 
     private var process: Process?
+    private var step4Start: Date?
     private(set) var jobDir: URL?
     private(set) var base = ""
 
     static let stepNames = ["", "Lyd", "Diarization", "Språk per taler", "Transkriberer"]
 
+    /// Steg 2 rapporterer nå fremdrift per understeg, ikke bare steg 4.
+    /// Baren fylles og nullstilles per understeg i steg 2; det er med vilje.
+    /// Klemmes fordi pyannote teller forbi taket på siste chunk — målt
+    /// `completed: 64` av `total: 36` i segmentation.
     var fraction: Double? {
-        guard step == 4, total > 0 else { return nil }
-        return Double(done) / Double(total)
+        guard step == 2 || step == 4, total > 0 else { return nil }
+        return min(1, Double(done) / Double(total))
     }
-
-    /// Segmentene som faktisk går tapt hvis vi dreper prosessen nå (backend har ingen checkpointing).
-    var segmentsAtRisk: Int { step == 4 ? done : 0 }
 
     // MARK: - Start
 
@@ -58,13 +61,14 @@ final class TranscriptionJob: ObservableObject {
         let p = Process()
         p.executableURL = python
         // -u: uten den blir stdout blokk-bufret ved pipe og stegmarkørene kommer i én klump.
-        p.arguments = ["-u", backend.appending(path: "transcribe.py").path, input.path]
+        p.arguments = ["-u", backend.appending(path: "transcribe.py").path, input.path,
+                       "--progress", "json"]
         if let n = speakers { p.arguments! += ["--speakers", String(n)] }
         p.currentDirectoryURL = dir
 
         var env = ProcessInfo.processInfo.environment
-        // En .app startet fra Finder arver ikke Homebrew-PATH, og transcribe.py:31 kaller ffmpeg direkte.
-        env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+        // En .app startet fra Finder arver ikke Homebrew-PATH, og transcribe.py kaller ffmpeg direkte.
+        env["PATH"] = AppSettings.subprocessPATH
         env["PYTHONUNBUFFERED"] = "1"
         if !settings.hfToken.isEmpty { env["HF_TOKEN"] = settings.hfToken }
         p.environment = env
@@ -133,50 +137,81 @@ final class TranscriptionJob: ObservableObject {
         if log.count > 300 { log.removeFirst(log.count - 300) }
     }
 
-    func parseStdout(_ line: String) {
-        note(line)
-        let t = line.trimmingCharacters(in: .whitespaces)
+    /// Én linje fra `--progress json`. Ukjente nøkler ignoreres av Decodable,
+    /// så backend kan legge til felt uten å knekke dette.
+    struct Event: Decodable {
+        let event: String
+        var step: Int?
+        var name: String?
+        var sub: String?
+        var completed: Int?
+        var total: Int?
+        var speaker: String?
+        var language: String?
+        var segments: Int?
+        var speakers: Int?
+    }
 
-        // "1/4 lyd…" … "4/4 transkriberer…"
-        if t.count > 3, t.dropFirst(1).hasPrefix("/4 "), let n = Int(t.prefix(1)), (1...4).contains(n) {
-            step = n
-            stepLabel = Self.stepNames[n]
+    func parseStdout(_ line: String) {
+        let t = line.trimmingCharacters(in: .whitespaces)
+        guard !t.isEmpty else { return }
+        guard t.hasPrefix("{"), let data = t.data(using: .utf8),
+              let e = try? JSONDecoder().decode(Event.self, from: data) else {
+            // Ikke-JSON på stdout i json-modus betyr at noe gikk galt — behold det.
+            note(t)
+            return
+        }
+        apply(e)
+    }
+
+    func apply(_ e: Event) {
+        switch e.event {
+        case "step":
+            step = e.step ?? step
+            stepLabel = Self.stepNames[(1...4).contains(step) ? step : 0]
             detail = ""
-            return
-        }
-        // "  509 segmenter, 3 talere"
-        if let m = t.firstMatch(#"^(\d+) segmenter, (\d+) talere$"#) {
-            total = Int(m[1]) ?? 0
-            speakerCount = Int(m[2]) ?? 0
+            done = 0
+            if step == 4 { step4Start = Date() }
+        case "progress":
+            done = e.completed ?? done
+            total = e.total ?? total
+            if let sub = e.sub {
+                detail = sub
+            } else if let s = e.speaker, let l = e.language {
+                detail = "\(s) (\(l))"
+            }
+            if step == 4 { eta = estimate() }
+        case "diarized":
+            total = e.segments ?? 0
+            speakerCount = e.speakers ?? 0
             detail = "\(total) segmenter, \(speakerCount) talere"
-            return
+        case "language":
+            detail = "taler \(e.completed ?? 0)/\(e.total ?? 0) — "
+                + "\(e.speaker ?? "?"): \(e.language ?? "?")"
+        case "resume":
+            detail = "gjenopptar \(e.completed ?? 0) ferdige segmenter"
+        case "done", "interrupted":
+            detail = ""
+            eta = ""
+        default:
+            break
         }
-        // "  taler 1/3 SPEAKER_00: sv  ("...")"
-        if let m = t.firstMatch(#"^taler (\d+)/(\d+) (\S+): (\S+)"#) {
-            detail = "taler \(m[1])/\(m[2]) — \(m[3]): \(m[4])"
-            return
-        }
-        if t.hasPrefix("Ferdig:") { detail = "" ; return }
-        if t.hasPrefix("HF_TOKEN ikke satt") {
-            state = .failed("HF_TOKEN mangler. Legg den inn i Innstillinger.")
-            return
-        }
-        // Steg 2 er pyannotes rich-bar på stdout — vis rå, ikke parse.
-        if step == 2, !t.isEmpty, !t.hasPrefix("2/4") { detail = t }
+    }
+
+    /// ponytail: enkelt snitt siden steg 4 startet. Ved gjenopptagelse flyr de
+    /// allerede ferdige segmentene forbi på null tid, så anslaget er for
+    /// optimistisk de første sekundene og retter seg selv etter hvert.
+    private func estimate() -> String {
+        guard let t0 = step4Start, done > 0, total > done else { return "" }
+        let left = Date().timeIntervalSince(t0) / Double(done) * Double(total - done)
+        let m = Int(left) / 60, s = Int(left) % 60
+        return m > 0 ? "\(m)m\(String(format: "%02d", s))s" : "\(s)s"
     }
 
     func parseStderr(_ line: String) {
-        // "  transkriberer:  42%|████▏ | 214/509 [08:31<11:44,  2.39s/seg, SPEAKER_00 no]"
-        // Desc-en må matches: huggingface skriver sin egen tqdm-bar hit
-        // ("Fetching 4 files: 100%|██| 4/4 [...]"), som ellers leses som falsk fremdrift.
-        if line.contains("transkriberer:"), let m = line.firstMatch(#"(\d+)/(\d+) \[[\d:]+<([\d:?]+)"#) {
-            done = Int(m[1]) ?? done
-            total = Int(m[2]) ?? total
-            eta = m[3]
-            if let s = line.firstMatch(#"(SPEAKER_\d+) (\w+)\]"#) {
-                detail = "\(s[1]) (\(s[2]))"
-            }
-            return
+        // sys.exit(melding) i backend skriver hit, ikke til stdout.
+        if line.contains("HF_TOKEN ikke satt") {
+            state = .failed("HF_TOKEN mangler. Legg den inn i Innstillinger.")
         }
         note(line)
     }
@@ -190,9 +225,13 @@ final class TranscriptionJob: ObservableObject {
 
         if case .failed = state { return }
 
-        guard p.terminationReason == .exit, p.terminationStatus == 0 else {
+        // 130/143 = backend fanget SIGINT/SIGTERM, skrev det som var ferdig, og
+        // la partial-fila igjen. Ikke en feil, og ikke et tap.
+        let interrupted = p.terminationReason == .exit && [130, 143].contains(p.terminationStatus)
+
+        guard p.terminationReason == .exit, p.terminationStatus == 0 || interrupted else {
             if p.terminationReason == .uncaughtSignal {
-                state = .failed("Avbrutt. Steg 1–3 er cachet og hoppes over ved ny start.")
+                state = .failed("Prosessen ble drept. Steg 1–3 er cachet og hoppes over ved ny start.")
             } else {
                 state = .failed(lastMeaningfulError() ?? "Python avsluttet med kode \(p.terminationStatus).")
             }
@@ -203,11 +242,11 @@ final class TranscriptionJob: ObservableObject {
         let json = dir.appending(path: "output/\(base).json")
         do {
             segments = try JSONDecoder().decode([Segment].self, from: Data(contentsOf: json))
-            state = .done
+            state = interrupted ? .stopped(segments.count) : .done
             step = 4
             detail = "\(segments.count) segmenter"
         } catch {
-            state = .failed("Kjøringen fullførte, men \(json.lastPathComponent) kunne ikke leses: \(error.localizedDescription)")
+            state = .failed("Kjøringen \(interrupted ? "ble avbrutt" : "fullførte"), men \(json.lastPathComponent) kunne ikke leses: \(error.localizedDescription)")
         }
     }
 
