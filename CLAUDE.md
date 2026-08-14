@@ -298,6 +298,29 @@ Five things that already cost time:
 5. **`Window`, not `WindowGroup`.** `openWindow(id:)` against a WindowGroup opens
    a *new* window per recording instead of raising the existing one.
 
+**The two tracks are unbalanced, and the imbalance changes sign with the
+microphone.** So no gain constant can fix it — measured on macOS 26.6.1, two
+rounds per configuration, integrated loudness (EBU R128, which gates out the
+pauses in speech that would otherwise drag an RMS number down):
+
+```
+MacBook-mikrofon, 48 kHz    system −29.3 / −27.4    mik  −41.2 / −39.0   mik 11.7 dB svakere
+AirPods inn+ut,   24 kHz    system −30.8 / −30.6    mik  −19.9 / −19.6   mik 11.0 dB sterkere
+```
+
+The AirPods mic peaks at +1.1 dBFS (flat factor 0, so it grazes rather than
+clips) — that is the headset's own AGC, upstream of anything here. And the
+system side is not a property of this app at all: the tap sits **after** the
+source app's own volume control, so moving the slider in the player moved the
+system track 17.6 dB (−50.2 → −32.6 LUFS) without touching the macOS volume.
+Whether the macOS output knob moves it too is untested; the tap is a process
+tap, so it should sit before that one.
+
+A fixed correction would therefore improve one configuration and wreck the
+other. The level meters in the menu bar are the answer instead: they show the
+actual balance of the recording in progress, which is the one thing no constant
+can know. See [#7](https://github.com/Oschlo/schous/issues/7).
+
 The menu bar icon is `Resources/MenuBarIcon.png` — the same 16x16 sprite as the
 app icon, minus the background tile, emitted by `icon.py` alongside the `.icns`.
 It is loaded as a **template** image so the menu bar tints it for light/dark.
