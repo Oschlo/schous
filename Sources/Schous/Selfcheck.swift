@@ -70,6 +70,10 @@ func runSelfcheckAndExit() -> Never {
     let srt = try! String(contentsOf: dir.appending(path: "t.srt"), encoding: .utf8)
     check(srt == "1\n00:00:04,216 --> 00:00:07,905\nHans Martin (sv): Hei.\n\n",
           "srt: \(srt.debugDescription)")
+    // Standarden skriver alle tre. Uten denne kan .json-grenen bindes til feil
+    // format uten at noen sjekk over merker det — de leser bare txt og srt.
+    let all = try! FileManager.default.contentsOfDirectory(atPath: dir.path).sorted()
+    check(all == ["t.json", "t.srt", "t.txt"], "standard skriver ikke alle tre: \(all)")
     // Formatvalg: kun det som er bedt om skrives, og bare det.
     let only = URL.temporaryDirectory.appending(path: "schous-selfcheck-srt-\(getpid())")
     try! FileManager.default.createDirectory(at: only, withIntermediateDirectories: true)
