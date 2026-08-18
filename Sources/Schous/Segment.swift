@@ -20,14 +20,14 @@ func ts(_ sec: Double, _ sep: String = ",") -> String {
     return String(format: "%02d:%02d:%02d\(sep)%03d", h, m, s, ms)
 }
 
-enum OutputFormat: String, CaseIterable, Codable, Identifiable {
+enum OutputFormat: String, CaseIterable, Identifiable {
     case txt, srt, json
     var id: String { rawValue }
     var label: String { rawValue.uppercased() }
 }
 
 /// Port av write_outputs (transcribe.py:122-130). `names` mapper SPEAKER_00 → visningsnavn.
-/// Skriver <base>.json / .txt / .srt og returnerer stiene som ble skrevet.
+/// Skriver formatene i `formats` som <base>.txt / .srt / .json og returnerer stiene.
 /// `formats` er default alle tre, slik backend gjør — selfcheck sammenligner mot den.
 @discardableResult
 func writeOutputs(_ segs: [Segment], to dir: URL, base: String, names: [String: String] = [:],

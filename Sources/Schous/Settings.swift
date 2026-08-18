@@ -22,7 +22,11 @@ final class AppSettings: ObservableObject {
     /// Standardformatene «Lagre» skriver. Lagres som rawValues; ukjente
     /// strenger fra en nyere versjon droppes stille av init(rawValue:).
     @Published var formats: Set<OutputFormat> {
-        didSet { UserDefaults.standard.set(formats.map(\.rawValue), forKey: "outputFormats") }
+        didSet {
+            // Fast rekkefølge, ikke Set-ens: `defaults read` skal se likt ut mellom kjøringer.
+            UserDefaults.standard.set(OutputFormat.allCases.filter(formats.contains).map(\.rawValue),
+                                      forKey: "outputFormats")
+        }
     }
     @Published var checkResult: String?
     @Published var checking = false

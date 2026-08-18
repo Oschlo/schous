@@ -7,8 +7,6 @@ struct SpeakerEditorView: View {
     let outputDir: URL
     var onNewJob: () -> Void
 
-    @ObservedObject private var settings = AppSettings.shared
-
     @State private var names: [String: String] = [:]      // SPEAKER_00 → visningsnavn
     @State private var mergedInto: [String: String] = [:]  // SPEAKER_03 → SPEAKER_01
     @State private var status: String?
@@ -52,14 +50,12 @@ struct SpeakerEditorView: View {
                 Button("Ny fil", action: onNewJob)
                 // Delt knapp: klikk lagrer standardformatene fra Innstillinger,
                 // pilen skriver ett enkelt format uten å endre standarden.
-                Menu {
+                Menu("Lagre") {
                     ForEach(OutputFormat.allCases) { f in
                         Button("Bare \(f.label)") { save([f]) }
                     }
-                } label: {
-                    Text("Lagre")
                 } primaryAction: {
-                    save(settings.formats)
+                    save(AppSettings.shared.formats)
                 }
                 .buttonStyle(.borderedProminent)
                 .menuStyle(.button)
@@ -175,7 +171,10 @@ struct SpeakerEditorView: View {
             status = "Lagret \(list) i \(outputDir.lastPathComponent)"
         } catch {
             failed = true
-            status = "Klarte ikke å lagre: \(error.localizedDescription)"
+            // Skrivingene er separate: feiler den andre, ligger den første igjen på disk
+            // med nye navn ved siden av en fil som fortsatt har de gamle.
+            status = "Klarte ikke å lagre: \(error.localizedDescription). "
+                + "Filene i \(outputDir.lastPathComponent) kan være delvis oppdatert."
         }
     }
 
