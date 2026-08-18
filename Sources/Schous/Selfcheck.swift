@@ -70,6 +70,15 @@ func runSelfcheckAndExit() -> Never {
     let srt = try! String(contentsOf: dir.appending(path: "t.srt"), encoding: .utf8)
     check(srt == "1\n00:00:04,216 --> 00:00:07,905\nHans Martin (sv): Hei.\n\n",
           "srt: \(srt.debugDescription)")
+    // Formatvalg: kun det som er bedt om skrives, og bare det.
+    let only = URL.temporaryDirectory.appending(path: "schous-selfcheck-srt-\(getpid())")
+    try! FileManager.default.createDirectory(at: only, withIntermediateDirectories: true)
+    let written = try! writeOutputs(segs, to: only, base: "t", formats: [.srt])
+    check(written.map(\.lastPathComponent) == ["t.srt"], "formatvalg: \(written)")
+    let left = try! FileManager.default.contentsOfDirectory(atPath: only.path).sorted()
+    check(left == ["t.srt"], "formatvalg skrev mer enn bedt om: \(left)")
+    try? FileManager.default.removeItem(at: only)
+
     // Ikke `defer`: funksjonen ender i exit(), som ikke kjører defer-blokker — da
     // ble katalogen liggende igjen i temp etter hver eneste kjøring. Ryddes her,
     // der `dir` er ferdig brukt, så en senere feil ikke lekker den heller.

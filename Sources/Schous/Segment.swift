@@ -20,36 +20,52 @@ func ts(_ sec: Double, _ sep: String = ",") -> String {
     return String(format: "%02d:%02d:%02d\(sep)%03d", h, m, s, ms)
 }
 
+enum OutputFormat: String, CaseIterable, Codable, Identifiable {
+    case txt, srt, json
+    var id: String { rawValue }
+    var label: String { rawValue.uppercased() }
+}
+
 /// Port av write_outputs (transcribe.py:122-130). `names` mapper SPEAKER_00 → visningsnavn.
 /// Skriver <base>.json / .txt / .srt og returnerer stiene som ble skrevet.
+/// `formats` er default alle tre, slik backend gjør — selfcheck sammenligner mot den.
 @discardableResult
-func writeOutputs(_ segs: [Segment], to dir: URL, base: String, names: [String: String] = [:]) throws -> [URL] {
+func writeOutputs(_ segs: [Segment], to dir: URL, base: String, names: [String: String] = [:],
+                  formats: Set<OutputFormat> = Set(OutputFormat.allCases)) throws -> [URL] {
     func label(_ s: Segment) -> String { names[s.speaker] ?? s.speaker }
+    func url(_ f: OutputFormat) -> URL { dir.appendingPathComponent(base + "." + f.rawValue) }
 
-    let jsonURL = dir.appendingPathComponent(base + ".json")
-    let txtURL = dir.appendingPathComponent(base + ".txt")
-    let srtURL = dir.appendingPathComponent(base + ".srt")
+    var written: [URL] = []
 
-    let renamed = segs.map {
-        Segment(start: $0.start, end: $0.end, speaker: label($0), language: $0.language, text: $0.text)
+    if formats.contains(.txt) {
+        // ts(...)[:-4] i Python kutter ",mmm" → HH:MM:SS
+        let txt = segs.map { s in
+            "[\(String(ts(s.start, ".").dropLast(4)))] \(label(s)) (\(s.language)): \(s.text)"
+        }.joined(separator: "\n") + "\n"
+        try txt.write(to: url(.txt), atomically: true, encoding: .utf8)
+        written.append(url(.txt))
     }
-    let enc = JSONEncoder()
-    enc.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
-    try enc.encode(renamed).write(to: jsonURL)
 
-    // ts(...)[:-4] i Python kutter ",mmm" → HH:MM:SS
-    let txt = segs.map { s in
-        "[\(String(ts(s.start, ".").dropLast(4)))] \(label(s)) (\(s.language)): \(s.text)"
-    }.joined(separator: "\n") + "\n"
-    try txt.write(to: txtURL, atomically: true, encoding: .utf8)
+    if formats.contains(.srt) {
+        // Hver blokk avsluttes med blank linje, også den siste — som backendens f-string.
+        let srt = segs.enumerated().map { i, s in
+            "\(i + 1)\n\(ts(s.start)) --> \(ts(s.end))\n\(label(s)) (\(s.language)): \(s.text)\n\n"
+        }.joined()
+        try srt.write(to: url(.srt), atomically: true, encoding: .utf8)
+        written.append(url(.srt))
+    }
 
-    // Hver blokk avsluttes med blank linje, også den siste — som backendens f-string.
-    let srt = segs.enumerated().map { i, s in
-        "\(i + 1)\n\(ts(s.start)) --> \(ts(s.end))\n\(label(s)) (\(s.language)): \(s.text)\n\n"
-    }.joined()
-    try srt.write(to: srtURL, atomically: true, encoding: .utf8)
+    if formats.contains(.json) {
+        let renamed = segs.map {
+            Segment(start: $0.start, end: $0.end, speaker: label($0), language: $0.language, text: $0.text)
+        }
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
+        try enc.encode(renamed).write(to: url(.json))
+        written.append(url(.json))
+    }
 
-    return [txtURL, srtURL, jsonURL]
+    return written
 }
 
 /// Speiler backendens _selfcheck (transcribe.py:174-181). Kalles ved oppstart i debug.

@@ -137,7 +137,9 @@ Two buttons check the two halves:
 ![Step 4 of 4: a progress bar, a segment counter, an estimate of the time left,
 and the speaker and language of the segment being transcribed](docs/progress.png)
 
-Writes `<name>.txt`, `<name>.srt` and `<name>.json` to the folder you chose.
+Writes `<name>.txt`, `<name>.srt` and `<name>.json` to the folder you chose —
+or whichever of those you ticked under **Eksportformater** in Settings. The
+arrow beside **Lagre** writes a single format without changing that default.
 
 ## Recording from the menu bar
 
