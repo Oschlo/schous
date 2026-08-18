@@ -7,6 +7,8 @@ struct SpeakerEditorView: View {
     let outputDir: URL
     var onNewJob: () -> Void
 
+    @ObservedObject private var settings = AppSettings.shared
+
     @State private var names: [String: String] = [:]      // SPEAKER_00 → visningsnavn
     @State private var mergedInto: [String: String] = [:]  // SPEAKER_03 → SPEAKER_01
     @State private var status: String?
@@ -48,7 +50,20 @@ struct SpeakerEditorView: View {
             }
             ToolbarItemGroup(placement: .primaryAction) {
                 Button("Ny fil", action: onNewJob)
-                Button("Lagre", action: save).buttonStyle(.borderedProminent)
+                // Delt knapp: klikk lagrer standardformatene fra Innstillinger,
+                // pilen skriver ett enkelt format uten å endre standarden.
+                Menu {
+                    ForEach(OutputFormat.allCases) { f in
+                        Button("Bare \(f.label)") { save([f]) }
+                    }
+                } label: {
+                    Text("Lagre")
+                } primaryAction: {
+                    save(settings.formats)
+                }
+                .buttonStyle(.borderedProminent)
+                .menuStyle(.button)
+                .fixedSize()
             }
         }
         .onAppear(perform: loadMapping)
@@ -145,12 +160,19 @@ struct SpeakerEditorView: View {
 
     // MARK: - Lagring
 
-    private func save() {
+    private func save(_ formats: Set<OutputFormat>) {
+        guard !formats.isEmpty else {
+            failed = true
+            status = "Ingen eksportformater valgt — velg minst ett i Innstillinger."
+            return
+        }
         do {
-            let written = try writeOutputs(job.segments, to: outputDir, base: job.base, names: resolved)
+            let written = try writeOutputs(job.segments, to: outputDir, base: job.base,
+                                           names: resolved, formats: formats)
             saveMapping()
             failed = false
-            status = "Lagret \(written.count) filer i \(outputDir.lastPathComponent)"
+            let list = written.map { $0.pathExtension.uppercased() }.joined(separator: ", ")
+            status = "Lagret \(list) i \(outputDir.lastPathComponent)"
         } catch {
             failed = true
             status = "Klarte ikke å lagre: \(error.localizedDescription)"

@@ -19,6 +19,11 @@ final class AppSettings: ObservableObject {
             checkResult = nil
         }
     }
+    /// Standardformatene «Lagre» skriver. Lagres som rawValues; ukjente
+    /// strenger fra en nyere versjon droppes stille av init(rawValue:).
+    @Published var formats: Set<OutputFormat> {
+        didSet { UserDefaults.standard.set(formats.map(\.rawValue), forKey: "outputFormats") }
+    }
     @Published var checkResult: String?
     @Published var checking = false
 
@@ -43,6 +48,9 @@ final class AppSettings: ObservableObject {
 
     private init() {
         backendPath = UserDefaults.standard.string(forKey: "backendPath") ?? ""
+        let saved = UserDefaults.standard.stringArray(forKey: "outputFormats")
+        formats = saved.map { Set($0.compactMap(OutputFormat.init(rawValue:))) }
+            ?? Set(OutputFormat.allCases)
     }
 
     var backendURL: URL? { backendPath.isEmpty ? nil : URL(fileURLWithPath: backendPath) }
@@ -174,6 +182,18 @@ struct SettingsView: View {
                 Text("«Test backend» er lokal: ffmpeg, torch, pyannote, mlx-whisper. "
                      + "«Test modelltilgang» spør Hugging Face om tokenet lever og om "
                      + "modell-lisensene er godtatt — den eneste sjekken som bruker nett.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Eksportformater") {
+                ForEach(OutputFormat.allCases) { f in
+                    Toggle(f.label, isOn: Binding(
+                        get: { settings.formats.contains(f) },
+                        set: { on in
+                            if on { settings.formats.insert(f) } else { settings.formats.remove(f) }
+                        }))
+                }
+                Text("Hva «Lagre» skriver som standard. Menyen på Lagre-knappen "
+                     + "kan skrive ett enkelt format uten å endre dette.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Hugging Face") {
