@@ -63,12 +63,26 @@ Download `Schous.zip` from
 `Schous.app` in `/Applications`.
 
 The app is signed with a local certificate, not notarized with Apple. Download
-it in a browser and it gets quarantined and Gatekeeper refuses to open it —
-**right-click → Open** lets it through with the signature checked.
+it in a browser and it gets quarantined, and Gatekeeper refuses to open it:
+*"Apple kunne ikke fastslå om Schous er fri for skadevare."* The dialog offers
+only **Flytt til papirkurv** and **Ferdig** — there is no "open anyway" in it.
 
-`xattr -d com.apple.quarantine Schous.app` works too, but it turns the
-signature check off entirely, not just the notarization requirement. If you use
-it, check first that you have the app you think you have:
+Let it through in **System Settings → Privacy & Security**: try to open the app
+first, then scroll to the bottom of that pane, where an **Åpne likevel** button
+appears for the app you were just refused. That keeps Gatekeeper's assessment
+and records an explicit exception for this bundle.
+
+**Control-click → Open was the route here until macOS 15, and Apple removed it
+in Sequoia** — for an app with no Developer ID it now gives the same refusal as
+a double-click, which is the dialog above. That change is Apple's, not measured
+here; what was measured on macOS 26.6.1 is the refusal itself:
+`spctl -a -t exec Schous.app` → `rejected`, `origin=Schous Dev`, for both v0.1.0
+and v0.2.0. If you are following an older copy of these instructions, that is why.
+
+`xattr -dr com.apple.quarantine Schous.app` also works. It does not disable the
+signature — the bundle stays signed, and the microphone, audio-capture and
+`HF_TOKEN` grants still hang on it — but it does skip Gatekeeper's check that
+the app is the one that was published, so check that yourself first:
 
 ```zsh
 codesign --verify --strict -R \
