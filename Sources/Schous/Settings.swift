@@ -129,18 +129,27 @@ final class AppSettings: ObservableObject {
 
     /// `--selfcheck`: ffmpeg på PATH, de tre tunge importene, og parserne.
     /// Lokalt og uten nett, men tar noen sekunder på å importere torch.
+    ///
+    /// Fristen er rundhåndet fordi den bare skal fange en henging, ikke en treg
+    /// maskin. Målt her: 4,7 s kald, 2,7 s varm. Første kjøring etter en
+    /// installasjon leser torch fra kald disk og kan bruke atskillig lenger.
     func runSelfcheck() {
-        run(["transcribe.py", "--selfcheck"], expect: "selfcheck ok")
+        run(["transcribe.py", "--selfcheck"], expect: "selfcheck ok", timeout: 120)
     }
 
     /// `--check-access`: er tokenet i live, og er modell-lisensene godtatt med
     /// kontoen det tilhører. Eneste sjekken som rører nettet — derfor egen
     /// knapp, så den som kjører med HF_HUB_OFFLINE=1 slipper.
+    ///
+    /// Kortere frist enn selvtesten, og det er nettopp nettet som er grunnen:
+    /// `whoami` sender ingen `timeout=`, og sesjonen i `_http.py` har
+    /// `timeout=None`. Målt her: 0,8 s. 30 s er raust for et tregt nett og
+    /// kort nok til at en portal som aldri svarer ikke blir et evig venterom.
     func runAccessCheck() {
-        run(["transcribe.py", "--check-access"], expect: "access ok")
+        run(["transcribe.py", "--check-access"], expect: "access ok", timeout: 30)
     }
 
-    private func run(_ args: [String], expect: String) {
+    private func run(_ args: [String], expect: String, timeout: TimeInterval) {
         guard let backend = backendURL, let py = pythonURL else {
             checkResult = "Velg backend-mappen først."
             return
@@ -152,7 +161,7 @@ final class AppSettings: ObservableObject {
         checking = true
         checkResult = nil
         Task.detached {
-            let out = Self.capture(py, args: args, cwd: backend)
+            let out = Self.capture(py, args: args, cwd: backend, timeout: timeout)
             await MainActor.run {
                 self.checking = false
                 self.checkResult = out.contains(expect)
@@ -164,7 +173,25 @@ final class AppSettings: ObservableObject {
 
     /// Utenfor MainActor: torch-importen og nettkallet tar sekunder, og et
     /// waitUntilExit på hovedtråden ville frosset vinduet så lenge.
-    private nonisolated static func capture(_ py: URL, args: [String], cwd: URL) -> String {
+    ///
+    /// **Fristen er ikke pynt.** `readDataToEndOfFile` + `waitUntilExit` venter
+    /// evig, og `whoami` i `huggingface_hub` sender ingen `timeout=` — sesjonen
+    /// i `_http.py:311,322` står på `timeout=None`. På et nett som tar imot
+    /// TCP-forbindelsen og så tier — hotell- og konferanseportaler gjør nettopp
+    /// det — kom prosessen aldri tilbake. Og siden `SettingsView` legger
+    /// `.disabled(checking)` på *hele* skjemaet, satt brukeren igjen med en
+    /// snurrende ProgressView, ingen felt som kunne klikkes, ingen feilmelding
+    /// og ingen avbryt-knapp. Eneste vei ut var å drepe appen.
+    ///
+    /// Derfor en frist per kall i stedet for én felles: den lokale importen og
+    /// nettkallet feiler på helt ulike tidsskalaer, og ett tall som er trygt
+    /// for torch på kald disk ville gjort portal-tilfellet til tre minutters
+    /// venting.
+    /// Ikke `private`: `--selfcheck` må kunne kjøre den mot noe som henger med
+    /// vilje. En frist som aldri er sett utløse er en frist man tror på, ikke
+    /// en man vet virker.
+    nonisolated static func capture(_ py: URL, args: [String], cwd: URL,
+                                    timeout: TimeInterval) -> String {
         let p = Process()
         p.executableURL = py
         p.arguments = args
@@ -173,15 +200,42 @@ final class AppSettings: ObservableObject {
         let pipe = Pipe()
         p.standardOutput = pipe
         p.standardError = pipe
+        let started = Date()
         do {
             try p.run()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            p.waitUntilExit()
-            return String(decoding: data, as: UTF8.self)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
         } catch {
             return "Kunne ikke starte python: \(error.localizedDescription)"
         }
+        // Drepes utenfra når fristen går. `terminate()` lukker skriveenden, så
+        // readDataToEndOfFile under får EOF og slipper taket — uten dette ville
+        // en frist ikke hjulpet, for det er *lesingen* som henger, ikke ventingen.
+        let killer = DispatchWorkItem { if p.isRunning { p.terminate() } }
+        DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: killer)
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        killer.cancel()
+
+        // Stdout og stderr deler rør, så dette er alt prosessen rakk å si.
+        // Kappes: en advarselsstorm fra torch ville ellers strukket
+        // Innstillinger-vinduet ut av skjermen.
+        var text = String(decoding: data, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.count > 800 { text = "…" + text.suffix(800) }
+
+        // Målt forløpt tid, ikke et delt flagg: fristen er den eneste veien til
+        // en terminate() her, så en kjøring som varte så lenge *er* den som ble
+        // drept — og da slipper vi en Bool to tråder må enes om.
+        if Date().timeIntervalSince(started) >= timeout {
+            return "Ga opp etter \(Int(timeout)) s. Prosessen svarte ikke — "
+                + "sjekk nettforbindelsen (en åpen WiFi-portal tar imot "
+                + "forbindelsen og svarer så aldri).\n" + text
+        }
+        // Exit-koden leses, ellers ser en drept prosess ut som en som rakk å
+        // svare: avkortet output og ingenting som sier at den døde underveis.
+        guard p.terminationReason == .exit else {
+            return "Prosessen ble drept (signal \(p.terminationStatus)).\n" + text
+        }
+        return p.terminationStatus == 0 ? text : "kode \(p.terminationStatus): " + text
     }
 }
 

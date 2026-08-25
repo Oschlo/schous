@@ -197,6 +197,41 @@ The backend takes a positional source path, `--speakers N`, `--work-dir`,
   `work/<base>.diar.json` is absent, so a cached job runs fine with a dead token.
   Test token changes on a fresh job dir or you are testing nothing.
 
+### Sjekkene i Innstillinger har en frist, og den er ikke pynt
+
+`AppSettings.capture` ventet evig: `readDataToEndOfFile` + `waitUntilExit`, og
+`whoami` i `huggingface_hub` sender ingen `timeout=` — sesjonen i
+`_http.py:311,322` står på `timeout=None`. Et nett som tar imot TCP-forbindelsen
+og så tier (hotell- og konferanseportaler gjør nettopp det) ga derfor en prosess
+som aldri kom tilbake. Og `SettingsView` legger `.disabled(checking)` på *hele*
+skjemaet, så det brukeren satt igjen med var en snurrende ProgressView, ingen
+felt som kunne klikkes, ingen feilmelding og ingen avbryt-knapp. Eneste vei ut
+var å drepe appen.
+
+Fristen er per kall, ikke felles, fordi de to sjekkene feiler på ulike
+tidsskalaer — målt her:
+
+```
+transcribe.py --selfcheck        4,7 s kald · 2,7 s varm   → frist 120 s
+transcribe.py --check-access     0,8 s                     → frist 30 s
+```
+
+Ett tall som er trygt for torch på kald disk ville gjort portal-tilfellet til
+tre minutters venting.
+
+**`--selfcheck` kjører fristen mot `/bin/sleep`, og begge sjekkene der trengs.**
+Med `terminate()` fjernet står meldingen fortsatt «Ga opp etter 1 s», siden
+forløpt tid har passert fristen uansett — bare tidssjekken avslører at
+prosessen fikk sove ferdig:
+
+```
+uten terminate()   selfcheck FAILED: frist brukte 5.07 s — drepte ikke prosessen
+med terminate()    selfcheck ok, hele kjøringen på 1,56 s
+```
+
+En sjekk på meldingen alene ville altså stått grønn på en frist som ikke gjorde
+noen ting.
+
 ## Progress is a JSON protocol now, not text-scraping
 
 The app runs the backend with `--progress json`, and `TranscriptionJob.apply`
