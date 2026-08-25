@@ -60,6 +60,15 @@ func runSelfcheckAndExit() -> Never {
     check(job.state == .failed("Fant ikke noe Hugging Face-token. Kjør "
                                + "`.venv/bin/hf auth login` i backend-mappen."), "hf-token-feil")
 
+    // Miljøet subprosessene får: PATH satt, arvet HF_TOKEN borte. Sjekken sier
+    // ingenting uten en kontroll som må bevege seg, så den krever at forelderen
+    // faktisk har variabelen: `HF_TOKEN=x .build/debug/Schous --selfcheck`.
+    let env = AppSettings.subprocessEnv
+    check(env["PATH"] == AppSettings.subprocessPATH, "PATH i subprocessEnv: \(env["PATH"] ?? "nil")")
+    if ProcessInfo.processInfo.environment["HF_TOKEN"] != nil {
+        check(env["HF_TOKEN"] == nil, "arvet HF_TOKEN fulgte med til subprosessen")
+    }
+
     // Output-formatering mot backendens write_outputs
     let segs = [Segment(start: 4.216, end: 7.905, speaker: "SPEAKER_00", language: "sv", text: "Hei.")]
     let dir = URL.temporaryDirectory.appending(path: "schous-selfcheck-\(getpid())")

@@ -151,7 +151,12 @@ The backend takes a positional source path, `--speakers N`, `--work-dir`,
 - **`PATH` must be set explicitly.** `transcribe.py:31` calls `ffmpeg` with no
   path resolution, and an `.app` launched from Finder does not inherit
   `/opt/homebrew/bin`.
-- **The app passes no `HF_TOKEN` at all**, on purpose. `huggingface_hub.get_token()`
+- **The app passes no `HF_TOKEN` at all**, on purpose — and it *removes* an
+  inherited one, in `AppSettings.subprocessEnv`, which both the job and the two
+  Settings-buttons build their environment from. Launched with `open` from a
+  shell the app does inherit the `export`, and then «Test modelltilgang» would
+  answer ✓ for a token the next Finder launch does not have.
+  `huggingface_hub.get_token()`
   in the backend reads `HF_TOKEN` and falls back to `~/.cache/huggingface/token`,
   and only the file is reachable from Finder — nothing launched there inherits a
   shell, so the `export` in `~/.zshenv` covers terminal runs and never covers the
@@ -460,6 +465,12 @@ limitation, not a UI nicety. `root()` follows merge chains with a hop limit;
   `env -u HF_TOKEN open Schous.app`, og verifiser med `ps eww -p $(pgrep -x
   Schous)` at variabelen faktisk er borte — presence-sjekk, ikke utskrift, den
   linja inneholder tokenet i klartekst.
+
+  Appen stripper riktignok variabelen selv nå (`subprocessEnv`), så
+  subprosessene er dekket uansett hvordan den ble startet. `env -u` er likevel
+  den riktige vanen: den holder testen ærlig hvis strippingen forsvinner, og
+  `HF_TOKEN=x .build/debug/Schous --selfcheck` er kontrollen som sier fra —
+  uten variabelen satt i forelderen hopper den sjekken over og beviser ingenting.
 - `open Schous.app --args …` only passes arguments on a **fresh** launch.
   If the app is already running, `open` just activates it and `--input` is
   silently ignored. `pkill -x Schous` first.
