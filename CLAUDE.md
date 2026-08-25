@@ -452,6 +452,14 @@ limitation, not a UI nicety. `root()` follows merge chains with a hop limit;
   eies av `SecurityAgent`, så det er den som må sjekkes — og med
   `pgrep -x SecurityAgent`, ikke `-f`: mønsteret står i din egen kommandolinje,
   så `-f` matcher skallet som leter og gir alltid treff.
+- **`open Schous.app` fra et skall arver skallets miljø — Finder gjør det ikke.**
+  Målt: `open Schous.app` herfra ga appen `HF_TOKEN` i miljøet, mens
+  `launchctl getenv HF_TOKEN` er tom, altså kom den fra skallet og ikke fra
+  økta. En test av «finner appen tokenet uten skall?» som starter appen med
+  `open` måler dermed det motsatte av det den tror. Bruk
+  `env -u HF_TOKEN open Schous.app`, og verifiser med `ps eww -p $(pgrep -x
+  Schous)` at variabelen faktisk er borte — presence-sjekk, ikke utskrift, den
+  linja inneholder tokenet i klartekst.
 - `open Schous.app --args …` only passes arguments on a **fresh** launch.
   If the app is already running, `open` just activates it and `--input` is
   silently ignored. `pkill -x Schous` first.
