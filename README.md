@@ -80,8 +80,8 @@ here; what was measured on macOS 26.6.1 is the refusal itself:
 and v0.2.0. If you are following an older copy of these instructions, that is why.
 
 `xattr -dr com.apple.quarantine Schous.app` also works. It does not disable the
-signature — the bundle stays signed, and the microphone, audio-capture and
-`HF_TOKEN` grants still hang on it — but it does skip Gatekeeper's check that
+signature — the bundle stays signed, and the microphone and audio-capture
+grants still hang on it — but it does skip Gatekeeper's check that
 the app is the one that was published, so check that yourself first:
 
 ```zsh
@@ -91,9 +91,9 @@ codesign --verify --strict -R \
 ```
 
 No output other than `ok` means the bundle is intact and signed with the same
-certificate as last time — which is also what the microphone, audio-capture and
-`HF_TOKEN` permissions hang on, so an app that fails this would have asked for
-all of them again anyway.
+certificate as last time — which is also what the microphone and audio-capture
+permissions hang on, so an app that fails this would have asked for both of them
+again anyway.
 
 (That hash is ours. Build it yourself and you get a different one — see
 [CLAUDE.md](CLAUDE.md) under "Signering".)
@@ -122,10 +122,21 @@ account the token belongs to.** Skip it and the token is still valid, so the
 job starts normally and then fails in step 2 with a download error that never
 mentions licenses. It is the most likely first failure anyone hits.
 
+Give the token to `huggingface_hub` once, in the backend folder:
+
+```zsh
+.venv/bin/hf auth login
+```
+
+The app does not keep a token of its own. `huggingface_hub` reads `HF_TOKEN`
+first and falls back to `~/.cache/huggingface/token`, and only the file is
+visible to an app launched from Finder — nothing started from Finder inherits a
+shell, so an `export` in `~/.zshenv` reaches a terminal run and never reaches
+the app.
+
 Then, in the app — open Settings (⌘,) and fill in:
 
 - **Backend** — the folder holding `transcribe.py` and `.venv/`.
-- **HF_TOKEN** — Hugging Face token for pyannote diarization. Stored in Keychain.
 
 Two buttons check the two halves:
 

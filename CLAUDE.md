@@ -27,11 +27,10 @@ Grunnen er at ad-hoc-signatur gir
 designated => cdhash H"8c421e16…"          # ny for hver eneste build
 ```
 
-og både TCC (mikrofon, `kTCCServiceAudioCapture`) og Keychain-ACL-en på
-`HF_TOKEN` er nøklet på nøyaktig den strengen. Ad-hoc betyr derfor at **hver
-rebuild nullstiller alle tillatelser**: nytt mikrofon-spørsmål, nytt
-lydopptak-spørsmål, nytt Keychain-passord — midt i en test, og de må skrives inn
-for hånd. Med sertifikatet blir kravet
+og TCC (mikrofon, `kTCCServiceAudioCapture`) er nøklet på nøyaktig den strengen.
+Ad-hoc betyr derfor at **hver rebuild nullstiller alle tillatelser**: nytt
+mikrofon-spørsmål, nytt lydopptak-spørsmål — midt i en test, og dialogene må
+klikkes for hånd. Med sertifikatet blir kravet
 
 ```
 designated => identifier "co.oschlo.schous" and certificate leaf = H"b300de7a…"
@@ -79,8 +78,8 @@ Dev"` virker likevel, og **uten `-v` listes identiteten**, som er derfor
 Nøkkelen ligger i login-nøkkelringen, som er ulåst hele økta, og
 `-T /usr/bin/codesign` gjør at codesign får den uten å spørre. Da kan hvilken som
 helst lokal prosess signere en vilkårlig binær med `-i co.oschlo.schous` og få
-nøyaktig samme designated requirement — og dermed appens mikrofon-, lydopptak- og
-`HF_TOKEN`-tilganger. Ad-hoc hadde ikke det hullet, fordi cdhash-en flyttet seg
+nøyaktig samme designated requirement — og dermed appens mikrofon- og
+lydopptak-tilganger. Ad-hoc hadde ikke det hullet, fordi cdhash-en flyttet seg
 ved hver build. Byttet er altså en bevisst avveining: én manuell godkjenning spart
 per build, mot en TCC-grant som ikke lenger er bundet til én binær. Greit på en
 utviklermaskin, ikke greit å ta med i noe som distribueres. Vil du ha begge deler,
@@ -89,6 +88,37 @@ signeringen — det koster ett passordspørsmål per build.
 
 **Byttet fra ad-hoc til sertifikat er selv et identitetsbytte**, så det koster én
 siste runde med spørsmål. Deretter er det stille.
+
+### Hemmeligheter hører ikke hjemme i fil-nøkkelringen
+
+Sertifikatet over står stille for TCC. Det står **ikke** stille for Keychain, og
+det er ikke til å fikse med en selvsignert identitet. `HF_TOKEN` lå i
+nøkkelringen fram til [#26](https://github.com/Oschlo/schous/issues/26) og kostet
+én dialog per build. Fire veier ut ble målt, alle med en kontroll som måtte
+bevege seg (cdhash A ≠ cdhash B — en kommentarendring alene flytter den ikke,
+og en test uten den kontrollen beviser ingenting):
+
+```
+data-protection-keychain          SecItemAdd → -34018; med keychain-access-groups
+                                  dreper AMFI prosessen (exit 137)
+com.apple.application-identifier  overlever AMFI, men fortsatt -34018
+SecAccessCreate + trusted app     skriver og leser fint fra samme binær,
+                                  blokkerer fra den neste
+«alle apper»-ACL                  blokkerer like fullt
+teamid via OU= i sertifikatet     codesign: TeamIdentifier=not set
+```
+
+Mekanismen er ikke lista over tiltrodde apper, men **ACL-ens partisjonsliste**.
+Bevis: `/usr/bin/security` leser et `-A`-element stille, mens en Schous-signert
+probe blokkerer på *samme* element — og et element proben selv skrev, blokkerer
+`security` andre veien. Partisjonene er `apple:`, `apple-tool:`, `teamid:…` og
+`cdhash:…`, og uten Apple-team-ID faller vår tilbake på `cdhash:`, som flytter
+seg hver build. `sample` på den hengende prosessen står i
+`ClientSession::decrypt` og venter på securityd.
+
+Konsekvensen: **legg ikke en hemmelighet i fil-nøkkelringen i denne appen** før
+den har en ekte Developer ID. Tokenet eies nå av `huggingface_hub` i stedet, som
+er lageret økosystemet allerede vedlikeholder.
 
 **No Xcode project, on purpose.** This machine has only Command Line Tools, and
 SwiftUI/AppKit/UniformTypeIdentifiers all ship in the CLT SDK. `bundle.sh`
@@ -121,11 +151,15 @@ The backend takes a positional source path, `--speakers N`, `--work-dir`,
 - **`PATH` must be set explicitly.** `transcribe.py:31` calls `ffmpeg` with no
   path resolution, and an `.app` launched from Finder does not inherit
   `/opt/homebrew/bin`.
-- **`HF_TOKEN` comes from Keychain**, service `co.oschlo.schous`, account
-  `HF_TOKEN`. The app cannot read `~/.zshenv` — no shell environment from Finder.
-  Note the backend only checks the token when `work/<base>.diar.json` is absent,
-  so a cached job runs fine with a dead token. Test token changes on a fresh
-  job dir or you are testing nothing.
+- **The app passes no `HF_TOKEN` at all**, on purpose. `huggingface_hub.get_token()`
+  in the backend reads `HF_TOKEN` and falls back to `~/.cache/huggingface/token`,
+  and only the file is reachable from Finder — nothing launched there inherits a
+  shell, so the `export` in `~/.zshenv` covers terminal runs and never covers the
+  app. Set it once with `.venv/bin/hf auth login`. The app used to keep its own
+  copy in Keychain; see «Hemmeligheter hører ikke hjemme i fil-nøkkelringen» for
+  why that had to go. Note the backend only checks the token when
+  `work/<base>.diar.json` is absent, so a cached job runs fine with a dead token.
+  Test token changes on a fresh job dir or you are testing nothing.
 
 ## Progress is a JSON protocol now, not text-scraping
 
@@ -149,8 +183,9 @@ Three things that are true of this protocol and cost time to find:
    progress line must never be able to kill a job that has run for minutes.
 3. **stderr is not progress.** `huggingface_hub` still prints
    `Fetching 4 files: 100%|██| 4/4 […]` there, and `sys.exit(message)` in the
-   backend also goes to stderr — that is where the `HF_TOKEN ikke satt` check
-   lives, not stdout. Anything non-JSON on stdout is logged, not parsed.
+   backend also goes to stderr — that is where the «Fant ikke noe Hugging
+   Face-token» check lives, not stdout. Anything non-JSON on stdout is logged,
+   not parsed.
 
 Both pipes are still split on `\n` **and** `\r`.
 
@@ -405,21 +440,15 @@ limitation, not a UI nicety. `root()` follows merge chains with a hop limit;
 ## Testing gotchas
 
 - **Første kjøring etter et identitetsbytte krever et menneske.** Er appen
-  ad-hoc-signert (se «Signering»), gjelder det etter *hver* build: mikrofon,
-  lydopptak og Keychain spør på nytt, og dialogene må klikkes og passordet
-  skrives for hånd. En `open … && sleep 20 && sjekk resultatet` måler da bare en
+  ad-hoc-signert (se «Signering»), gjelder det etter *hver* build: mikrofon og
+  lydopptak spør på nytt, og dialogene må klikkes for hånd. En
+  `open … && sleep 20 && sjekk resultatet` måler da bare en
   app som står og venter på en dialog. Bygg med «Schous Dev»-identiteten, og hvis
   et spørsmål likevel er ventet: si fra til brukeren og vent på svar før du
   måler, ikke gjett på en delay.
-- **Stabil DR er ikke det samme som stille installasjon.** Et Keychain-element
-  hvis ACL ble laget under en *tidligere* identitet — typisk fra ad-hoc-tida —
-  spør på nytt selv om dagens designated requirement er uendret. Målt: fc6b1b4
-  installert over forrige app med byte-identisk signatur kostet likevel ett
-  `HF_TOKEN`-spørsmål ved første oppstart. Det er engangs, men det må klikkes
-  **«Alltid tillat»**, ikke «Tillat»: den første skriver appen inn i ACL-en,
-  den andre gjelder bare den ene gangen.
 - **`prosess-status: S` beviser ingenting.** En app som står og venter på en
-  TCC- eller Keychain-dialog ser ut som en app som kjører helt fint. Dialogen
+  TCC-dialog ser ut som en app som kjører helt fint. Det gjelder `codesign` i
+  `bundle.sh` også, som venter på nøkkelringen. Dialogen
   eies av `SecurityAgent`, så det er den som må sjekkes — og med
   `pgrep -x SecurityAgent`, ikke `-f`: mønsteret står i din egen kommandolinje,
   så `-f` matcher skallet som leter og gir alltid treff.

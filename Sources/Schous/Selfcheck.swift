@@ -56,8 +56,9 @@ func runSelfcheckAndExit() -> Never {
     check(job.done == 215 && job.total == 509, "stderr forurenset: \(job.done)/\(job.total)")
 
     // sys.exit(melding) i backend går til stderr, ikke stdout.
-    job.parseStderr("HF_TOKEN ikke satt. export HF_TOKEN=hf_...")
-    check(job.state == .failed("HF_TOKEN mangler. Legg den inn i Innstillinger."), "hf-token-feil")
+    job.parseStderr("Fant ikke noe Hugging Face-token.")
+    check(job.state == .failed("Fant ikke noe Hugging Face-token. Kjør "
+                               + "`.venv/bin/hf auth login` i backend-mappen."), "hf-token-feil")
 
     // Output-formatering mot backendens write_outputs
     let segs = [Segment(start: 4.216, end: 7.905, speaker: "SPEAKER_00", language: "sv", text: "Hei.")]
