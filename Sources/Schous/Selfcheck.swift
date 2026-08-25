@@ -83,6 +83,33 @@ func runSelfcheckAndExit() -> Never {
           "subprocessEnv arver ikke lenger foreldremiljøet")
     for key in AppSettings.hfEnvKeys { unsetenv(key) }
 
+    // Rekkefølgen mellom stderr og prosess-slutt, kjørt mot en ekte prosess.
+    //
+    // To feil satt her. terminationHandler og readabilityHandler køer hver sin
+    // Task { @MainActor } og ingenting rekkefølger dem, så tapte stderr
+    // kappløpet var `log` tom når finish() spurte lastMeaningfulError(). Og
+    // EOF-grenen i attach droppet det som lå igjen i bufferet, altså enhver
+    // siste linje uten avsluttende linjeskift.
+    //
+    // `printf` uten \n treffer begge på én gang: linja finnes bare i bufferet
+    // ved EOF, og den må ha nådd parseStderr før finish konkluderer. Kommer den
+    // ikke fram, faller finish() tilbake på «Python avsluttet med kode 1».
+    let raceJob = TranscriptionJob()
+    let sh = Process()
+    sh.executableURL = URL(fileURLWithPath: "/bin/sh")
+    sh.arguments = ["-c", "printf 'Fant ikke noe Hugging Face-token.' >&2; exit 1"]
+    raceJob.supervise(sh)
+    let raceDeadline = Date().addingTimeInterval(10)
+    var settled = false
+    while !settled, Date() < raceDeadline {
+        RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        if case .failed = raceJob.state { settled = true }
+    }
+    check(raceJob.state == .failed("Fant ikke noe Hugging Face-token. Appen ignorerer "
+                                   + "HF_TOKEN i miljøet med vilje — kjør "
+                                   + "`.venv/bin/hf auth login` i backend-mappen."),
+          "kappløp/EOF: \(raceJob.state)")
+
     // Fristen i capture: en prosess som aldri svarer må gi opp, ikke henge.
     // Kontrollen er /bin/sleep, som med sikkerhet overlever fristen.
     //

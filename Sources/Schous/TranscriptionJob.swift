@@ -21,6 +21,10 @@ final class TranscriptionJob: ObservableObject {
     @Published var log: [String] = []
 
     private var process: Process?
+    /// Rør som ennå ikke har nådd EOF, og prosessen som har avsluttet.
+    /// `finish` kjøres først når begge deler er på plass — se `tryFinish`.
+    private var openPipes = 0
+    private var exitedProcess: Process?
     private var step4Start: Date?
     private(set) var jobDir: URL?
     private(set) var base = ""
@@ -72,14 +76,26 @@ final class TranscriptionJob: ObservableObject {
         env["PYTHONUNBUFFERED"] = "1"
         p.environment = env
 
+        supervise(p)
+    }
+
+    /// Kobler rør, linjeparsing og terminering på `p`, og starter den.
+    ///
+    /// Skilt ut fra `start()` med vilje: uten en slik inngang kan `--selfcheck`
+    /// bare kalle `parseStdout`/`parseStderr` direkte, og da testes parserne
+    /// mens *rekkefølgen mellom dem og `finish`* — som er der feilen satt —
+    /// aldri kjøres.
+    func supervise(_ p: Process) {
         let out = Pipe(), err = Pipe()
         p.standardOutput = out
         p.standardError = err
         attach(out) { [weak self] in self?.parseStdout($0) }
         attach(err) { [weak self] in self?.parseStderr($0) }
 
+        openPipes = 2
+        exitedProcess = nil
         p.terminationHandler = { [weak self] proc in
-            Task { @MainActor in self?.finish(proc) }
+            Task { @MainActor in self?.processExited(proc) }
         }
 
         do {
@@ -117,9 +133,21 @@ final class TranscriptionJob: ObservableObject {
 
     private func attach(_ pipe: Pipe, _ handler: @escaping @MainActor (String) -> Void) {
         let buffer = LineBuffer()
-        pipe.fileHandleForReading.readabilityHandler = { fh in
+        pipe.fileHandleForReading.readabilityHandler = { [weak self] fh in
             let data = fh.availableData
-            guard !data.isEmpty else { return }
+            // Tomt les er EOF, ikke «ingenting ennå». Her lå to feil: siste
+            // linje uten avsluttende linjeskift ble liggende igjen i buffer og
+            // nådde aldri fram, og ingen fortalte finish() at røret var tomt.
+            guard !data.isEmpty else {
+                fh.readabilityHandler = nil
+                let rest = buffer.text
+                buffer.text = ""
+                Task { @MainActor in
+                    if !rest.isEmpty { handler(rest) }
+                    self?.pipeClosed()
+                }
+                return
+            }
             buffer.text += String(decoding: data, as: UTF8.self)
             // tqdm bruker \r, print bruker \n — begge er linjeskiller for oss.
             var lines = buffer.text.components(separatedBy: CharacterSet(charactersIn: "\n\r"))
@@ -127,6 +155,53 @@ final class TranscriptionJob: ObservableObject {
             let complete = lines
             Task { @MainActor in complete.forEach(handler) }
         }
+    }
+
+    /// Ett rør har nådd EOF.
+    private func pipeClosed() {
+        openPipes = max(0, openPipes - 1)
+        tryFinish()
+    }
+
+    /// Prosessen har avsluttet. Det er *ikke* nok til å konkludere: linjene fra
+    /// stderr kommer via sine egne `Task { @MainActor }`, og ingenting
+    /// rekkefølger dem mot denne. Tapte den kappløpet, var `log` fortsatt tom
+    /// når `finish` kalte `lastMeaningfulError()`, og «Fant ikke noe Hugging
+    /// Face-token» ble til et nakent «Python avsluttet med kode 1».
+    ///
+    /// **Vær ærlig om hva som er målt her.** `--selfcheck` beviser
+    /// EOF-flushen: uten den blir det nettopp «Python avsluttet med kode 1».
+    /// Porten i `tryFinish` er *ikke* bevist på samme måte — med den fjernet,
+    /// men flushen beholdt, sto testen grønn 8 av 8 runder, fordi EOF på denne
+    /// maskinen faktisk leveres før termineringen. Det er et kappløp, så åtte
+    /// grønne runder beviser ingenting; bare rekkefølgen gjør det. Samme
+    /// argument som for mikrofonen før tappen i `Recorder`. Porten blir
+    /// stående av den grunn, ikke fordi en måling krevde den.
+    private func processExited(_ p: Process) {
+        exitedProcess = p
+        tryFinish()
+        guard exitedProcess != nil else { return }
+
+        // Nødutgang. Et barnebarn som arver røret kan i prinsippet holde det
+        // åpent etter at python er borte, og da ville jobben blitt stående for
+        // alltid — å bytte en tapt feilmelding mot en evig spinner er ingen
+        // forbedring. transcribe.py venter riktignok på ffmpeg før den
+        // avslutter, så dette skal ikke kunne inntreffe; fristen er her fordi
+        // «skal ikke kunne» ikke er det samme som «kan ikke».
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard let self, self.exitedProcess != nil else { return }
+            self.note("rørene lukket ikke etter at prosessen avsluttet")
+            self.openPipes = 0
+            self.tryFinish()
+        }
+    }
+
+    /// Konkluderer først når alt er sagt og prosessen er borte.
+    private func tryFinish() {
+        guard openPipes == 0, let p = exitedProcess else { return }
+        exitedProcess = nil
+        finish(p)
     }
 
     private func note(_ line: String) {

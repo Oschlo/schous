@@ -264,6 +264,40 @@ The old parser scraped `1/4 lyd…`, `  N segmenter, M talere` and a tqdm bar
 whose `mininterval` was 10 s under a pipe. If you are reading a bug report older
 than 2026-08-14, that is what it is describing.
 
+### Prosess-slutt er ikke det samme som at alt er sagt
+
+`terminationHandler` og `readabilityHandler` køer hver sin
+`Task { @MainActor }`, og ingenting rekkefølger dem. Tapte stderr kappløpet, var
+`log` tom når `finish()` spurte `lastMeaningfulError()`, og «Fant ikke noe
+Hugging Face-token» kom ut som et nakent «Python avsluttet med kode 1» — null
+diagnose for det README kaller den mest sannsynlige førstegangsfeilen.
+
+I tillegg droppet EOF-grenen i `attach` det som lå igjen i bufferet, altså
+enhver siste linje uten avsluttende linjeskift.
+
+`finish()` kjøres derfor via `tryFinish()`, som venter til begge rørene har nådd
+EOF *og* prosessen er borte. `--selfcheck` kjører hele veien mot en ekte
+prosess: `printf` uten `\n` til stderr og `exit 1`, som treffer begge feilene
+samtidig.
+
+**Hva som faktisk er målt:** EOF-flushen er bevist — uten den:
+
+```
+selfcheck FAILED: kappløp/EOF: failed("Python avsluttet med kode 1.")
+```
+
+Porten i `tryFinish` er det **ikke**. Med porten fjernet og flushen beholdt sto
+testen grønn 8 av 8 runder, fordi EOF her leveres før termineringen. Det er et
+kappløp, så åtte grønne runder beviser ingenting — bare rekkefølgen gjør det,
+samme argument som for mikrofonen før tappen. Porten står av den grunn, ikke
+fordi en måling krevde den. Fjerner du den, har du ikke målt at den var
+unødvendig; du har målt at maskinen din var heldig.
+
+`processExited` har en frist på 2 s som konkluderer uansett hvis rørene ikke
+lukker. transcribe.py venter på ffmpeg før den avslutter, så det skal ikke kunne
+skje — men å bytte en tapt feilmelding mot en evig spinner ville ikke vært noen
+forbedring.
+
 ## Signals
 
 - **Pause is `SIGSTOP`, resume is `SIGCONT`.** Cheap and instant, but it holds
