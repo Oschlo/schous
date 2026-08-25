@@ -36,11 +36,11 @@ cp Resources/MenuBarIcon.png "$APP/Contents/Resources/MenuBarIcon.png"
 # Signering med den lokale «Schous Dev»-identiteten når den finnes, ellers ad-hoc.
 #
 # Dette er ikke pynt. Ad-hoc-signatur gir `designated => cdhash H"…"`, som endrer
-# seg ved hver eneste build — og både TCC (mikrofon, lydopptak) og Keychain-ACL-en
-# på HF_TOKEN er nøklet på nettopp den strengen. Ad-hoc betyr derfor at hver
-# rebuild krever at du godkjenner alt på nytt for hånd, midt i en test. Med
-# sertifikatet blir kravet `identifier "co.oschlo.schous" and certificate leaf =
-# H"…"`, som står stille for alltid. Se «Signering» i CLAUDE.md for oppsettet.
+# seg ved hver eneste build — og TCC (mikrofon, lydopptak) er nøklet på nettopp
+# den strengen. Ad-hoc betyr derfor at hver rebuild krever at du godkjenner alt på
+# nytt for hånd, midt i en test. Med sertifikatet blir kravet
+# `identifier "co.oschlo.schous" and certificate leaf = H"…"`, som står stille for
+# alltid. Se «Signering» i CLAUDE.md for oppsettet.
 #
 # ponytail: fortsatt lokalt selvsignert. Notarisering når appen skal distribueres.
 #
@@ -52,8 +52,8 @@ cp Resources/MenuBarIcon.png "$APP/Contents/Resources/MenuBarIcon.png"
 # `--options runtime` hører med til den stabile signaturen, ikke ved siden av den.
 # Uten hardened runtime laster appen hva som helst via DYLD_INSERT_LIBRARIES, og
 # når signaturen over gjør TCC-granten permanent, blir det en permanent vei inn til
-# mikrofonen, systemlyden og HF_TOKEN. Hardened runtime stenger til gjengjeld
-# mikrofonen uansett hva TCC har sagt ja til, så den må entitles eksplisitt — se
+# mikrofonen og systemlyden. Hardened runtime stenger til gjengjeld mikrofonen
+# uansett hva TCC har sagt ja til, så den må entitles eksplisitt — se
 # Resources/Schous.entitlements. Library validation følger med på kjøpet, men alt
 # binæren lenker mot ligger i /usr/lib og /System (`otool -L`), så det koster null.
 SIGN=(--force --options runtime --entitlements Resources/Schous.entitlements)
@@ -61,7 +61,7 @@ if security find-identity -p codesigning | grep -q '"Schous Dev"'; then
   codesign "${SIGN[@]}" --sign "Schous Dev" "$APP"
 else
   echo "advarsel: fant ikke «Schous Dev» — ad-hoc-signerer, og da må du godkjenne"
-  echo "         mikrofon, lydopptak og Keychain på nytt etter hver build."
+  echo "         mikrofon og lydopptak på nytt etter hver build."
   codesign "${SIGN[@]}" --sign - "$APP"
 fi
 

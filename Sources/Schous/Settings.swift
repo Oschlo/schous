@@ -1,5 +1,4 @@
 import SwiftUI
-import Security
 
 @MainActor
 final class AppSettings: ObservableObject {
@@ -31,25 +30,6 @@ final class AppSettings: ObservableObject {
     @Published var checkResult: String?
     @Published var checking = false
 
-    private var loadedToken: String?
-
-    /// Leses fra Keychain første gang noen spør, ikke ved oppstart: ellers
-    /// kjører SecItemCopyMatching idet vinduet bygges, og et ACL-spørsmål
-    /// dukker opp uten sammenheng med noe brukeren gjorde.
-    var hfToken: String {
-        get {
-            if loadedToken == nil { loadedToken = Keychain.get("HF_TOKEN") ?? "" }
-            return loadedToken!
-        }
-        set {
-            guard newValue != hfToken else { return }   // SecItemDelete+Add bygger ACL-en på nytt
-            objectWillChange.send()
-            loadedToken = newValue
-            Keychain.set(newValue, for: "HF_TOKEN")
-            checkResult = nil
-        }
-    }
-
     private init() {
         backendPath = UserDefaults.standard.string(forKey: "backendPath") ?? ""
         let saved = UserDefaults.standard.stringArray(forKey: "outputFormats")
@@ -68,17 +48,17 @@ final class AppSettings: ObservableObject {
     /// `--selfcheck`: ffmpeg på PATH, de tre tunge importene, og parserne.
     /// Lokalt og uten nett, men tar noen sekunder på å importere torch.
     func runSelfcheck() {
-        run(["transcribe.py", "--selfcheck"], expect: "selfcheck ok", token: nil)
+        run(["transcribe.py", "--selfcheck"], expect: "selfcheck ok")
     }
 
     /// `--check-access`: er tokenet i live, og er modell-lisensene godtatt med
     /// kontoen det tilhører. Eneste sjekken som rører nettet — derfor egen
     /// knapp, så den som kjører med HF_HUB_OFFLINE=1 slipper.
     func runAccessCheck() {
-        run(["transcribe.py", "--check-access"], expect: "access ok", token: hfToken)
+        run(["transcribe.py", "--check-access"], expect: "access ok")
     }
 
-    private func run(_ args: [String], expect: String, token: String?) {
+    private func run(_ args: [String], expect: String) {
         guard let backend = backendURL, let py = pythonURL else {
             checkResult = "Velg backend-mappen først."
             return
@@ -90,7 +70,7 @@ final class AppSettings: ObservableObject {
         checking = true
         checkResult = nil
         Task.detached {
-            let out = Self.capture(py, args: args, cwd: backend, token: token)
+            let out = Self.capture(py, args: args, cwd: backend)
             await MainActor.run {
                 self.checking = false
                 self.checkResult = out.contains(expect)
@@ -102,19 +82,13 @@ final class AppSettings: ObservableObject {
 
     /// Utenfor MainActor: torch-importen og nettkallet tar sekunder, og et
     /// waitUntilExit på hovedtråden ville frosset vinduet så lenge.
-    private nonisolated static func capture(_ py: URL, args: [String], cwd: URL,
-                                            token: String?) -> String {
+    private nonisolated static func capture(_ py: URL, args: [String], cwd: URL) -> String {
         let p = Process()
         p.executableURL = py
         p.arguments = args
         p.currentDirectoryURL = cwd
         var env = ProcessInfo.processInfo.environment
         env["PATH"] = subprocessPATH
-        // Et token på nil betyr «denne sjekken bryr seg ikke». Er det tomt, skal
-        // det være tomt: arves HF_TOKEN fra skallet appen ble startet fra, ville
-        // «Test modelltilgang» blitt grønn på et token Keychain ikke har — og
-        // neste start fra Finder feilet.
-        if let token { env["HF_TOKEN"] = token.isEmpty ? nil : token }
         p.environment = env
         let pipe = Pipe()
         p.standardOutput = pipe
@@ -128,37 +102,6 @@ final class AppSettings: ObservableObject {
         } catch {
             return "Kunne ikke starte python: \(error.localizedDescription)"
         }
-    }
-}
-
-enum Keychain {
-    private static let service = "co.oschlo.schous"
-
-    static func get(_ account: String) -> String? {
-        let q: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var item: CFTypeRef?
-        guard SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data else { return nil }
-        return String(decoding: data, as: UTF8.self)
-    }
-
-    static func set(_ value: String, for account: String) {
-        let base: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-        ]
-        SecItemDelete(base as CFDictionary)
-        guard !value.isEmpty else { return }
-        var add = base
-        add[kSecValueData as String] = Data(value.utf8)
-        SecItemAdd(add as CFDictionary, nil)
     }
 }
 
@@ -201,15 +144,18 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Hugging Face") {
-                SecureField("HF_TOKEN", text: $settings.hfToken)
-                    .textFieldStyle(.roundedBorder)
-                Text("Kreves for pyannote-diarization. Lagres i Keychain.")
+                // Ikke et felt: tokenet eies av huggingface_hub, som leser
+                // HF_TOKEN og faller tilbake på ~/.cache/huggingface/token.
+                // En egen kopi her måtte ligge i Keychain, og den ACL-en er
+                // nøklet på cdhash — altså én dialog per build. Se #26.
+                Text("Tokenet settes med `hf auth login` i backend-mappen, "
+                     + "ikke her. «Test modelltilgang» sier fra hvis det mangler.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
-        // Hele skjemaet, ikke bare knappene: sjekken kjører på stien og tokenet
-        // slik de var da den startet, så et felt som kan endres mens den går,
-        // gir et grønt svar på noe som aldri ble sjekket.
+        // Hele skjemaet, ikke bare knappene: sjekken kjører på stien slik den
+        // var da den startet, så et felt som kan endres mens den går, gir et
+        // grønt svar på noe som aldri ble sjekket.
         .disabled(settings.checking)
         .formStyle(.grouped)
         .frame(width: 480)

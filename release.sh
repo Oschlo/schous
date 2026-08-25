@@ -57,9 +57,8 @@ ditto -c -k --keepParent Schous.app Schous.zip
 # Grep-varianten ville altså lagt ut en bundle Gatekeeper avviser.
 #
 # Kravet er pinnet mot leaf-hashen, ikke mot CN-en: det er hashen TCC (mikrofon,
-# lydopptak) og Keychain-ACL-en på HF_TOKEN er nøklet på, og et nytt selvsignert
-# sertifikat med samme navn ville nullstilt alle tre hos hver bruker uten at noe
-# her merket det. Se «Signering» i CLAUDE.md. Bytter du sertifikat, er det denne
+# lydopptak) er nøklet på, og et nytt selvsignert sertifikat med samme navn ville
+# nullstilt begge hos hver bruker uten at noe her merket det. Se «Signering» i CLAUDE.md. Bytter du sertifikat, er det denne
 # linja som skal oppdateres — og at den stopper deg er poenget.
 rm -rf .release-verify
 ditto -x -k Schous.zip .release-verify

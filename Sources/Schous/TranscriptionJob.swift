@@ -70,7 +70,6 @@ final class TranscriptionJob: ObservableObject {
         // En .app startet fra Finder arver ikke Homebrew-PATH, og transcribe.py kaller ffmpeg direkte.
         env["PATH"] = AppSettings.subprocessPATH
         env["PYTHONUNBUFFERED"] = "1"
-        if !settings.hfToken.isEmpty { env["HF_TOKEN"] = settings.hfToken }
         p.environment = env
 
         let out = Pipe(), err = Pipe()
@@ -210,8 +209,11 @@ final class TranscriptionJob: ObservableObject {
 
     func parseStderr(_ line: String) {
         // sys.exit(melding) i backend skriver hit, ikke til stdout.
-        if line.contains("HF_TOKEN ikke satt") {
-            state = .failed("HF_TOKEN mangler. Legg den inn i Innstillinger.")
+        // Matcher på starten, ikke hele linja: backenden legger til en linje med
+        // rådet under, og den er dens å formulere.
+        if line.contains("Fant ikke noe Hugging Face-token") {
+            state = .failed("Fant ikke noe Hugging Face-token. Kjør "
+                            + "`.venv/bin/hf auth login` i backend-mappen.")
         }
         note(line)
     }

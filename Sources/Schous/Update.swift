@@ -4,9 +4,9 @@ import SwiftUI
 ///
 /// Ingen selvoppdatering: den åpner release-siden, og du drar den nye appen inn
 /// i /Applications selv. Å bytte ut bundlen mens den kjører er ikke problemet —
-/// signaturen er det. Både TCC (mikrofon, lydopptak) og Keychain-ACL-en på
-/// HF_TOKEN henger på designated requirement, så en nedlastet app som er signert
-/// med noe annet enn «Schous Dev» spør om alt på nytt. Se CLAUDE.md.
+/// signaturen er det. TCC (mikrofon, lydopptak) henger på designated requirement,
+/// så en nedlastet app som er signert med noe annet enn «Schous Dev» spør om alt
+/// på nytt. Se CLAUDE.md.
 @MainActor
 final class Updater: ObservableObject {
     static let shared = Updater()
