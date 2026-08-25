@@ -66,9 +66,9 @@ final class TranscriptionJob: ObservableObject {
         if let n = speakers { p.arguments! += ["--speakers", String(n)] }
         p.currentDirectoryURL = dir
 
-        var env = ProcessInfo.processInfo.environment
-        // En .app startet fra Finder arver ikke Homebrew-PATH, og transcribe.py kaller ffmpeg direkte.
-        env["PATH"] = AppSettings.subprocessPATH
+        // Setter PATH (Finder gir ikke Homebrew, og transcribe.py kaller ffmpeg
+        // direkte) og fjerner et arvet HF_TOKEN, så jobben ser samme token som sjekken.
+        var env = AppSettings.subprocessEnv
         env["PYTHONUNBUFFERED"] = "1"
         p.environment = env
 

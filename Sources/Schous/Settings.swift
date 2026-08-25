@@ -9,6 +9,21 @@ final class AppSettings: ObservableObject {
     /// det som gjelder når det står på.
     nonisolated static let subprocessPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
+    /// Miljøet både jobbene og sjekkene kjører med.
+    ///
+    /// `HF_TOKEN` fjernes med vilje. Appen har ikke lenger noe token selv —
+    /// `huggingface_hub.get_token()` i backenden leser fila — men den *arver*
+    /// ett hvis den ble startet fra et skall der `~/.zshenv` har exportet det.
+    /// Finder gjør ikke det. Uten denne linja svarer «Test modelltilgang»
+    /// ✓ på et token som forsvinner ved neste normale start, altså et grønt
+    /// svar på et spørsmål ingen stilte. Én kilde, den fila eier.
+    nonisolated static var subprocessEnv: [String: String] {
+        var env = ProcessInfo.processInfo.environment
+        env["PATH"] = subprocessPATH
+        env["HF_TOKEN"] = nil
+        return env
+    }
+
     /// Endres stien eller tokenet, gjelder ikke lenger svaret fra forrige sjekk.
     /// Å la et grønt «✓ access ok» stå over et token som nettopp ble byttet er
     /// verre enn ikke å ha svart: det er et svar på et spørsmål ingen stilte.
@@ -87,9 +102,7 @@ final class AppSettings: ObservableObject {
         p.executableURL = py
         p.arguments = args
         p.currentDirectoryURL = cwd
-        var env = ProcessInfo.processInfo.environment
-        env["PATH"] = subprocessPATH
-        p.environment = env
+        p.environment = subprocessEnv
         let pipe = Pipe()
         p.standardOutput = pipe
         p.standardError = pipe
