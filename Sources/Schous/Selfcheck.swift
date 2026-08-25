@@ -83,6 +83,32 @@ func runSelfcheckAndExit() -> Never {
           "subprocessEnv arver ikke lenger foreldremiljøet")
     for key in AppSettings.hfEnvKeys { unsetenv(key) }
 
+    // Fristen i capture: en prosess som aldri svarer må gi opp, ikke henge.
+    // Kontrollen er /bin/sleep, som med sikkerhet overlever fristen.
+    //
+    // Begge sjekkene trengs, og det er målt: med drepingen fjernet står
+    // meldingen fortsatt «Ga opp etter 1 s» — forløpt tid har jo passert
+    // fristen — mens prosessen i virkeligheten fikk sove ferdig. Bare
+    // tidssjekken fanget det:
+    //
+    //     uten terminate()   FAILED: frist brukte 5.07 s — drepte ikke prosessen
+    //     med terminate()    selfcheck ok, hele kjøringen på 1,56 s
+    //
+    // En sjekk på meldingen alene ville altså vært grønn på en frist som ikke
+    // gjorde noen ting.
+    let hangStart = Date()
+    let hung = AppSettings.capture(URL(fileURLWithPath: "/bin/sleep"), args: ["5"],
+                                   cwd: URL.temporaryDirectory, timeout: 1)
+    let hangElapsed = Date().timeIntervalSince(hangStart)
+    check(hung.hasPrefix("Ga opp etter 1 s"), "frist ga ikke opp: \(hung.prefix(60))")
+    check(hangElapsed < 3, "frist brukte \(hangElapsed) s — drepte ikke prosessen")
+
+    // Og den må ikke slå til på noe som svarer i tide, ellers er den bare en
+    // ny måte å feile på.
+    let quick = AppSettings.capture(URL(fileURLWithPath: "/bin/echo"), args: ["hei"],
+                                    cwd: URL.temporaryDirectory, timeout: 10)
+    check(quick == "hei", "rask kommando kom ikke rent gjennom: \(quick.debugDescription)")
+
     // Output-formatering mot backendens write_outputs
     let segs = [Segment(start: 4.216, end: 7.905, speaker: "SPEAKER_00", language: "sv", text: "Hei.")]
     let dir = URL.temporaryDirectory.appending(path: "schous-selfcheck-\(getpid())")
