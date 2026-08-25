@@ -94,7 +94,7 @@ siste runde med spørsmål. Deretter er det stille.
 Sertifikatet over står stille for TCC. Det står **ikke** stille for Keychain, og
 det er ikke til å fikse med en selvsignert identitet. `HF_TOKEN` lå i
 nøkkelringen fram til [#26](https://github.com/Oschlo/schous/issues/26) og kostet
-én dialog per build. Fire veier ut ble målt, alle med en kontroll som måtte
+én dialog per build. Fem veier ut ble målt, alle med en kontroll som måtte
 bevege seg (cdhash A ≠ cdhash B — en kommentarendring alene flytter den ikke,
 og en test uten den kontrollen beviser ingenting):
 
@@ -119,6 +119,20 @@ seg hver build. `sample` på den hengende prosessen står i
 Konsekvensen: **legg ikke en hemmelighet i fil-nøkkelringen i denne appen** før
 den har en ekte Developer ID. Tokenet eies nå av `huggingface_hub` i stedet, som
 er lageret økosystemet allerede vedlikeholder.
+
+**Det gamle elementet blir liggende, og appen sletter det ikke.** Koden som
+skrev det er borte, men elementet står igjen hos alle som kjørte en eldre
+versjon — målt på denne maskinen etter oppgraderingen:
+`security find-generic-password -s co.oschlo.schous -a HF_TOKEN` finner det
+fortsatt. For den som aldri kjørte `hf auth login` er det den siste kopien, så
+en app som stille kaster den tar en avgjørelse som ikke er dens.
+`LegacyKeychain.hasOrphanedToken` oppdager det og Innstillinger viser
+slettekommandoen — samme form som `systemWarning`: oppgi det som er observert,
+og la den som sitter der velge. Presence-sjekken spør kun etter attributter,
+aldri `kSecReturnData`, så det er ingen dekryptering og dermed ingen ACL-dialog;
+målt, svar med én gang og `SecurityAgent` startet ikke. Slettingen går via
+`/usr/bin/security`, som ligger i `apple-tool:`-partisjonen og slipper gjennom
+stille der en Schous-signert binær ville blitt stoppet.
 
 **No Xcode project, on purpose.** This machine has only Command Line Tools, and
 SwiftUI/AppKit/UniformTypeIdentifiers all ship in the CLT SDK. `bundle.sh`
@@ -151,11 +165,28 @@ The backend takes a positional source path, `--speakers N`, `--work-dir`,
 - **`PATH` must be set explicitly.** `transcribe.py:31` calls `ffmpeg` with no
   path resolution, and an `.app` launched from Finder does not inherit
   `/opt/homebrew/bin`.
-- **The app passes no `HF_TOKEN` at all**, on purpose — and it *removes* an
-  inherited one, in `AppSettings.subprocessEnv`, which both the job and the two
-  Settings-buttons build their environment from. Launched with `open` from a
-  shell the app does inherit the `export`, and then «Test modelltilgang» would
-  answer ✓ for a token the next Finder launch does not have.
+- **The app passes no token at all**, on purpose — and it *removes* every
+  variable `huggingface_hub` would find one through, in
+  `AppSettings.subprocessEnv`, which both the job and the two Settings-buttons
+  build their environment from. Launched with `open` from a shell the app does
+  inherit the `export` — and without the strip «Test modelltilgang» would then
+  answer ✓ for a token the next Finder launch does not have. That is what the
+  strip is for.
+
+  **One variable is not enough**, which is why `AppSettings.hfEnvKeys` is a list.
+  `_auth.py:147` is `os.environ.get("HF_TOKEN") or
+  os.environ.get("HUGGING_FACE_HUB_TOKEN")`, and `HF_TOKEN_PATH`/`HF_HOME` move
+  the *file* the fallback reads. Measured with `HF_HOME` pointed at an empty
+  directory, so only the environment could answer:
+
+  ```
+  ingen av variablene satt        get_token -> None
+  kun HUGGING_FACE_HUB_TOKEN      get_token -> len=19
+  ```
+
+  Stripping `HF_HOME` takes the model cache with it, not just the token. That is
+  deliberate: a Finder launch never sees it, so following it from a shell would
+  make the app behave differently depending on how it was started.
   `huggingface_hub.get_token()`
   in the backend reads `HF_TOKEN` and falls back to `~/.cache/huggingface/token`,
   and only the file is reachable from Finder — nothing launched there inherits a
@@ -466,11 +497,21 @@ limitation, not a UI nicety. `root()` follows merge chains with a hop limit;
   Schous)` at variabelen faktisk er borte — presence-sjekk, ikke utskrift, den
   linja inneholder tokenet i klartekst.
 
-  Appen stripper riktignok variabelen selv nå (`subprocessEnv`), så
+  Appen stripper riktignok variablene selv nå (`subprocessEnv`), så
   subprosessene er dekket uansett hvordan den ble startet. `env -u` er likevel
-  den riktige vanen: den holder testen ærlig hvis strippingen forsvinner, og
-  `HF_TOKEN=x .build/debug/Schous --selfcheck` er kontrollen som sier fra —
-  uten variabelen satt i forelderen hopper den sjekken over og beviser ingenting.
+  den riktige vanen: den holder testen ærlig hvis strippingen forsvinner.
+  `--selfcheck` trenger ikke lenger noe av deg — den setter variablene selv med
+  `setenv` og krever at hele `hfEnvKeys` blir borte. Den betingede forma den
+  hadde først hoppet over seg selv i et rent skall, og da skilte ikke et grønt
+  «selfcheck ok» «verifisert» fra «aldri kjørt». Kontrollen, målt:
+
+  ```
+  uten strippingen        selfcheck FAILED: arvet HF_TOKEN fulgte med
+  kun HF_TOKEN strippet   selfcheck FAILED: arvet HUGGING_FACE_HUB_TOKEN fulgte med
+  hele lista strippet     selfcheck ok
+  ```
+
+  Den midterste linja er poenget: det var den feilen som faktisk ble sluppet.
 - `open Schous.app --args …` only passes arguments on a **fresh** launch.
   If the app is already running, `open` just activates it and `--input` is
   silently ignored. `pkill -x Schous` first.

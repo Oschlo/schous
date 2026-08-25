@@ -57,17 +57,31 @@ func runSelfcheckAndExit() -> Never {
 
     // sys.exit(melding) i backend går til stderr, ikke stdout.
     job.parseStderr("Fant ikke noe Hugging Face-token.")
-    check(job.state == .failed("Fant ikke noe Hugging Face-token. Kjør "
+    check(job.state == .failed("Fant ikke noe Hugging Face-token. Appen ignorerer "
+                               + "HF_TOKEN i miljøet med vilje — kjør "
                                + "`.venv/bin/hf auth login` i backend-mappen."), "hf-token-feil")
 
-    // Miljøet subprosessene får: PATH satt, arvet HF_TOKEN borte. Sjekken sier
-    // ingenting uten en kontroll som må bevege seg, så den krever at forelderen
-    // faktisk har variabelen: `HF_TOKEN=x .build/debug/Schous --selfcheck`.
+    // Miljøet subprosessene får: PATH satt, alle arvede token-variabler borte.
+    //
+    // Sjekken setter variablene selv i stedet for å be om
+    // `HF_TOKEN=x … --selfcheck`. Den betingede forma hoppet over seg selv i et
+    // rent skall, og et grønt «selfcheck ok» skilte da ikke «verifisert» fra
+    // «aldri kjørt» — samme falske grønt som strippingen finnes for å fjerne.
+    // setenv er synlig for ProcessInfo på Darwin; målt: nil → satt → nil.
+    for key in AppSettings.hfEnvKeys { setenv(key, "arvet-fra-skallet", 1) }
     let env = AppSettings.subprocessEnv
     check(env["PATH"] == AppSettings.subprocessPATH, "PATH i subprocessEnv: \(env["PATH"] ?? "nil")")
-    if ProcessInfo.processInfo.environment["HF_TOKEN"] != nil {
-        check(env["HF_TOKEN"] == nil, "arvet HF_TOKEN fulgte med til subprosessen")
+    // Hele lista, ikke bare den første: huggingface_hub faller tilbake fra
+    // HF_TOKEN til HUGGING_FACE_HUB_TOKEN, og HF_TOKEN_PATH/HF_HOME flytter fila.
+    for key in AppSettings.hfEnvKeys {
+        check(env[key] == nil, "arvet \(key) fulgte med til subprosessen")
     }
+    // Arver fortsatt resten: en «opprydding» til et eksplisitt minimalt miljø
+    // ville tatt HOME med seg, og da finner get_token() aldri
+    // ~/.cache/huggingface/token — den eneste token-kilden appen har igjen.
+    check(env["HOME"] == ProcessInfo.processInfo.environment["HOME"],
+          "subprocessEnv arver ikke lenger foreldremiljøet")
+    for key in AppSettings.hfEnvKeys { unsetenv(key) }
 
     // Output-formatering mot backendens write_outputs
     let segs = [Segment(start: 4.216, end: 7.905, speaker: "SPEAKER_00", language: "sv", text: "Hei.")]

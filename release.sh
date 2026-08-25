@@ -58,7 +58,8 @@ ditto -c -k --keepParent Schous.app Schous.zip
 #
 # Kravet er pinnet mot leaf-hashen, ikke mot CN-en: det er hashen TCC (mikrofon,
 # lydopptak) er nøklet på, og et nytt selvsignert sertifikat med samme navn ville
-# nullstilt begge hos hver bruker uten at noe her merket det. Se «Signering» i CLAUDE.md. Bytter du sertifikat, er det denne
+# nullstilt begge hos hver bruker uten at noe her merket det. Se «Signering» i
+# CLAUDE.md. Bytter du sertifikat, er det denne
 # linja som skal oppdateres — og at den stopper deg er poenget.
 rm -rf .release-verify
 ditto -x -k Schous.zip .release-verify

@@ -1,4 +1,44 @@
 import SwiftUI
+import Security
+
+/// Fram til #26 lå tokenet i login-nøkkelringen. Koden som skrev det er borte,
+/// men elementet blir liggende hos alle som brukte en eldre versjon — en
+/// hemmelighet ingenting lenger eier. Målt på denne maskinen etter oppgraderingen:
+/// `security find-generic-password -s co.oschlo.schous -a HF_TOKEN` → finnes.
+///
+/// Appen sletter det ikke selv. For den som aldri kjørte `hf auth login` er
+/// dette den siste kopien, og en app som stille kaster den ville tatt en
+/// avgjørelse som ikke er dens. Så den sier fra, slik `systemWarning` gjør med
+/// tapp-stillheten: oppgi det som er observert, og la den som sitter der velge.
+///
+/// Kun attributter, aldri `kSecReturnData`: uten dekryptering er det ingen
+/// ACL-dialog. Målt — svar med én gang, `SecurityAgent` startet ikke.
+enum LegacyKeychain {
+    /// `static let`, ikke en beregnet property: den leses fra en SwiftUI-`body`,
+    /// som kjøres på nytt ved hvert tastetrykk i backend-feltet — en
+    /// Keychain-spørring per tegn er sløsing uten gevinst. Elementet dukker
+    /// ikke opp midt i en økt. Prisen er at varselet blir stående til appen
+    /// startes på nytt hvis du sletter elementet mens den kjører.
+    static let hasOrphanedToken: Bool = {
+        let q: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "co.oschlo.schous",
+            kSecAttrAccount as String: "HF_TOKEN",
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var item: CFTypeRef?
+        return SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess
+    }()
+
+    /// Kommandoen brukeren kan kopiere. `/usr/bin/security` ligger i
+    /// `apple-tool:`-partisjonen og slipper gjennom ACL-en stille — den samme
+    /// asymmetrien som er dokumentert under «Hemmeligheter hører ikke hjemme i
+    /// fil-nøkkelringen»: verktøyet leser og sletter der en Schous-signert
+    /// binær ville blitt stoppet.
+    static let removeCommand =
+        "security delete-generic-password -s co.oschlo.schous -a HF_TOKEN"
+}
 
 @MainActor
 final class AppSettings: ObservableObject {
@@ -9,24 +49,51 @@ final class AppSettings: ObservableObject {
     /// det som gjelder når det står på.
     nonisolated static let subprocessPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
-    /// Miljøet både jobbene og sjekkene kjører med.
+    /// Grunnmiljøet både jobbene og sjekkene bygger videre på.
     ///
-    /// `HF_TOKEN` fjernes med vilje. Appen har ikke lenger noe token selv —
+    /// Token-variablene fjernes med vilje. Appen har ikke noe token selv —
     /// `huggingface_hub.get_token()` i backenden leser fila — men den *arver*
-    /// ett hvis den ble startet fra et skall der `~/.zshenv` har exportet det.
-    /// Finder gjør ikke det. Uten denne linja svarer «Test modelltilgang»
-    /// ✓ på et token som forsvinner ved neste normale start, altså et grønt
-    /// svar på et spørsmål ingen stilte. Én kilde, den fila eier.
+    /// det skallet hadde hvis den ble startet med `open` fra et skall der
+    /// `~/.zshenv` exporterer noe. Finder gjør ikke det. Uten strippingen
+    /// svarer «Test modelltilgang» ✓ på et token som forsvinner ved neste
+    /// normale start, altså et grønt svar på et spørsmål ingen stilte.
+    ///
+    /// Én variabel er ikke nok, og det er hele grunnen til at dette er en
+    /// liste: `_auth.py:147` er `os.environ.get("HF_TOKEN") or
+    /// os.environ.get("HUGGING_FACE_HUB_TOKEN")`, og `HF_TOKEN_PATH`/`HF_HOME`
+    /// flytter *fila* fallbacken leser. Målt med `HF_HOME` mot en tom mappe,
+    /// så bare miljøet kunne svare:
+    ///
+    ///     ingen av variablene satt        get_token -> None
+    ///     kun HUGGING_FACE_HUB_TOKEN      get_token -> len=19
+    ///
+    /// `HF_HOME` tar modell-cachen med seg, ikke bare tokenet. Det er med
+    /// vilje: en Finder-start ser den aldri, så en app som følger den fra et
+    /// skall ville oppført seg forskjellig avhengig av hvordan den ble startet
+    /// — og det er nøyaktig feilen dette skal fjerne.
     nonisolated static var subprocessEnv: [String: String] {
         var env = ProcessInfo.processInfo.environment
         env["PATH"] = subprocessPATH
-        env["HF_TOKEN"] = nil
+        for key in hfEnvKeys { env.removeValue(forKey: key) }
         return env
     }
 
-    /// Endres stien eller tokenet, gjelder ikke lenger svaret fra forrige sjekk.
-    /// Å la et grønt «✓ access ok» stå over et token som nettopp ble byttet er
-    /// verre enn ikke å ha svart: det er et svar på et spørsmål ingen stilte.
+    /// Alt `huggingface_hub` leser for å finne et token. Egen konstant fordi
+    /// `--selfcheck` må kunne slå fast at *hele* lista blir borte, ikke bare
+    /// den første — en sjekk på `HF_TOKEN` alene ville stått grønn gjennom
+    /// nøyaktig den feilen som gjorde dette nødvendig.
+    nonisolated static let hfEnvKeys = ["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN",
+                                        "HF_TOKEN_PATH", "HF_HOME"]
+
+    /// Endres stien, gjelder ikke lenger svaret fra forrige sjekk. Å la et
+    /// grønt «✓ access ok» stå over en backend som nettopp ble byttet er verre
+    /// enn ikke å ha svart: det er et svar på et spørsmål ingen stilte.
+    ///
+    /// Tokenet har ikke det vernet lenger, og det er en reell kostnad ved å
+    /// gi det fra seg: det settes med `hf auth login` *utenfor* appen, og
+    /// ingenting her får vite at det skjedde. Et grønt svar kan altså stå over
+    /// et token som er byttet siden. Trykk «Test modelltilgang» på nytt etter
+    /// en `hf auth login` — appen kan ikke gjøre det for deg.
     @Published var backendPath: String {
         didSet {
             UserDefaults.standard.set(backendPath, forKey: "backendPath")
@@ -162,8 +229,17 @@ struct SettingsView: View {
                 // En egen kopi her måtte ligge i Keychain, og den ACL-en er
                 // nøklet på cdhash — altså én dialog per build. Se #26.
                 Text("Tokenet settes med `hf auth login` i backend-mappen, "
-                     + "ikke her. «Test modelltilgang» sier fra hvis det mangler.")
+                     + "ikke her. Appen ignorerer `HF_TOKEN` i miljøet med vilje, "
+                     + "så en `export` i `~/.zshenv` gjelder terminalen og ikke "
+                     + "appen. «Test modelltilgang» sier fra hvis det mangler.")
                     .font(.caption).foregroundStyle(.secondary)
+                if LegacyKeychain.hasOrphanedToken {
+                    Text("En eldre versjon la et token i nøkkelringen. Det brukes "
+                         + "ikke lenger, og blir liggende til du fjerner det:")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text(LegacyKeychain.removeCommand)
+                        .font(.caption.monospaced()).textSelection(.enabled)
+                }
             }
         }
         // Hele skjemaet, ikke bare knappene: sjekken kjører på stien slik den

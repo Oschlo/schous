@@ -128,17 +128,22 @@ Give the token to `huggingface_hub` once, in the backend folder:
 .venv/bin/hf auth login
 ```
 
-The app does not keep a token of its own. `huggingface_hub` reads `HF_TOKEN`
-first and falls back to `~/.cache/huggingface/token`, and only the file is
-visible to an app launched from Finder — nothing started from Finder inherits a
-shell, so an `export` in `~/.zshenv` reaches a terminal run and never reaches
-the app.
+The app keeps no token of its own, and it **removes `HF_TOKEN` from the
+environment** it hands the backend — along with `HUGGING_FACE_HUB_TOKEN`,
+`HF_TOKEN_PATH` and `HF_HOME`. So for the app the file is the only source,
+however you launched it. An `export` in `~/.zshenv` reaches a terminal run and
+never the app, and that is deliberate rather than incidental: launched with
+`open` from a shell the app *would* inherit the export, and "Test modelltilgang"
+would then answer ✓ for a token the next Finder launch does not have.
 
-Then, in the app — open Settings (⌘,) and fill in:
+(Left alone, `huggingface_hub` would read `HF_TOKEN` first and fall back to the
+file. Inside the app that ordering never applies.)
 
-- **Backend** — the folder holding `transcribe.py` and `.venv/`.
+Then, in the app — open Settings (⌘,) and point **Backend** at the folder holding
+`transcribe.py` and `.venv/`. That is the only thing to fill in; the token lives
+in `huggingface_hub`, above.
 
-Two buttons check the two halves:
+Two buttons check the two halves — the install and the token:
 
 - **Test backend** runs `transcribe.py --selfcheck`: `ffmpeg` on `PATH`, and
   that `torch`, `pyannote.audio` and `mlx_whisper` actually import. Local, no

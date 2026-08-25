@@ -209,10 +209,18 @@ final class TranscriptionJob: ObservableObject {
 
     func parseStderr(_ line: String) {
         // sys.exit(melding) i backend skriver hit, ikke til stdout.
-        // Matcher på starten, ikke hele linja: backenden legger til en linje med
-        // rådet under, og den er dens å formulere.
+        // Delstreng, ikke likhet: backendens linje ender på punktum, og punktumet
+        // er dens å endre. Rådslinja under kommer uansett som sin egen linje —
+        // attach() splitter på \n og \r — så den kan ikke havne her.
+        //
+        // Appen må formulere rådet selv, og må nevne strippingen: backendens
+        // egen andre linje tilbyr «eller export HF_TOKEN=hf_...», og det er
+        // nøyaktig det subprocessEnv fjerner. Uten den setningen ser brukeren
+        // et satt HF_TOKEN i skallet, en backend som virker for hånd, og en app
+        // som sier at tokenet mangler — uten noen vei fra motsigelsen til svaret.
         if line.contains("Fant ikke noe Hugging Face-token") {
-            state = .failed("Fant ikke noe Hugging Face-token. Kjør "
+            state = .failed("Fant ikke noe Hugging Face-token. Appen ignorerer "
+                            + "HF_TOKEN i miljøet med vilje — kjør "
                             + "`.venv/bin/hf auth login` i backend-mappen.")
         }
         note(line)
