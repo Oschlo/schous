@@ -191,7 +191,24 @@ The backend takes a positional source path, `--speakers N`, `--work-dir`,
   in the backend reads `HF_TOKEN` and falls back to `~/.cache/huggingface/token`,
   and only the file is reachable from Finder — nothing launched there inherits a
   shell, so the `export` in `~/.zshenv` covers terminal runs and never covers the
-  app. Set it once with `.venv/bin/hf auth login`. The app used to keep its own
+  app. Set it once with `AppSettings.hfLoginCommand`, which is
+  `.venv/bin/hf auth login` behind `env -u HF_HOME -u HF_TOKEN_PATH` — **the
+  `env -u` is load-bearing.** `hf auth login` writes to
+  `constants.HF_TOKEN_PATH`, and both variables move it:
+
+  ```
+  ingen satt              ->  ~/.cache/huggingface/token
+  HF_HOME=/tmp/hfhome     ->  /tmp/hfhome/token
+  HF_TOKEN_PATH=/tmp/tok  ->  /tmp/tok
+  ```
+
+  Stripping them in `subprocessEnv` and *not* in the command the app recommends
+  is the same bug seen from the other end: the shell writes the token where the
+  app has just removed the path to, `hf auth login` reports success, and the app
+  keeps saying the token is missing however many times the advice is followed.
+  `--selfcheck` therefore requires every `_HOME`/`_PATH` key in `hfEnvKeys` to
+  appear as `-u <key>` in `hfLoginCommand`, so the list cannot grow without the
+  command following it. The app used to keep its own
   copy in Keychain; see «Hemmeligheter hører ikke hjemme i fil-nøkkelringen» for
   why that had to go. Note the backend only checks the token when
   `work/<base>.diar.json` is absent, so a cached job runs fine with a dead token.
