@@ -288,15 +288,10 @@ final class TranscriptionJob: ObservableObject {
         // er dens å endre. Rådslinja under kommer uansett som sin egen linje —
         // attach() splitter på \n og \r — så den kan ikke havne her.
         //
-        // Appen må formulere rådet selv, og må nevne strippingen: backendens
-        // egen andre linje tilbyr «eller export HF_TOKEN=hf_...», og det er
-        // nøyaktig det subprocessEnv fjerner. Uten den setningen ser brukeren
-        // et satt HF_TOKEN i skallet, en backend som virker for hånd, og en app
-        // som sier at tokenet mangler — uten noen vei fra motsigelsen til svaret.
+        // Appen må formulere rådet selv; se AppSettings.hfTokenMissingMessage
+        // for hvorfor det må nevne både strippingen og fila.
         if line.contains("Fant ikke noe Hugging Face-token") {
-            state = .failed("Fant ikke noe Hugging Face-token. Appen ignorerer "
-                            + "HF_TOKEN i miljøet med vilje — kjør "
-                            + "`.venv/bin/hf auth login` i backend-mappen.")
+            state = .failed(AppSettings.hfTokenMissingMessage)
         }
         note(line)
     }

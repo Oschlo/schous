@@ -85,6 +85,37 @@ final class AppSettings: ObservableObject {
     nonisolated static let hfEnvKeys = ["HF_TOKEN", "HUGGING_FACE_HUB_TOKEN",
                                         "HF_TOKEN_PATH", "HF_HOME"]
 
+    /// Den eneste fila appen kan finne et token i. `subprocessEnv` fjerner
+    /// `HF_HOME` og `HF_TOKEN_PATH`, så `constants.HF_TOKEN_PATH` i backenden
+    /// faller alltid tilbake på standarden — uansett hva skallet exporterte.
+    nonisolated static let hfTokenFile = "~/.cache/huggingface/token"
+
+    /// `env -u` er ikke pynt. `hf auth login` skriver til
+    /// `constants.HF_TOKEN_PATH`, og begge variablene flytter den. Målt:
+    ///
+    ///     ingen satt              -> ~/.cache/huggingface/token
+    ///     HF_HOME=/tmp/hfhome     -> /tmp/hfhome/token
+    ///     HF_TOKEN_PATH=/tmp/tok  -> /tmp/tok
+    ///
+    /// Uten `env -u` legger altså et skall som exporterer én av dem tokenet et
+    /// sted appen har fjernet veien til, og «kjør `hf auth login`» blir et råd
+    /// som ikke virker uansett hvor mange ganger det følges.
+    nonisolated static let hfLoginCommand =
+        "env -u HF_HOME -u HF_TOKEN_PATH .venv/bin/hf auth login"
+
+    /// Rådet appen gir når backenden sier at tokenet mangler. Ett sted, fordi
+    /// `--selfcheck` sammenligner mot det og de to ellers ville drevet fra
+    /// hverandre uten at noe sa fra.
+    ///
+    /// Nevner både strippingen og fila: backendens egen andre linje tilbyr
+    /// «eller export HF_TOKEN=hf_...», som er nøyaktig det `subprocessEnv`
+    /// fjerner. Uten den setningen ser brukeren et satt HF_TOKEN i skallet, en
+    /// backend som virker for hånd, og en app som sier at tokenet mangler.
+    nonisolated static let hfTokenMissingMessage =
+        "Fant ikke noe Hugging Face-token. Appen ignorerer HF_TOKEN, HF_HOME og "
+        + "HF_TOKEN_PATH i miljøet med vilje og leser kun \(hfTokenFile) — kjør "
+        + "`\(hfLoginCommand)` i backend-mappen."
+
     /// Endres stien, gjelder ikke lenger svaret fra forrige sjekk. Å la et
     /// grønt «✓ access ok» stå over en backend som nettopp ble byttet er verre
     /// enn ikke å ha svart: det er et svar på et spørsmål ingen stilte.
@@ -282,11 +313,17 @@ struct SettingsView: View {
                 // HF_TOKEN og faller tilbake på ~/.cache/huggingface/token.
                 // En egen kopi her måtte ligge i Keychain, og den ACL-en er
                 // nøklet på cdhash — altså én dialog per build. Se #26.
-                Text("Tokenet settes med `hf auth login` i backend-mappen, "
-                     + "ikke her. Appen ignorerer `HF_TOKEN` i miljøet med vilje, "
-                     + "så en `export` i `~/.zshenv` gjelder terminalen og ikke "
-                     + "appen. «Test modelltilgang» sier fra hvis det mangler.")
+                Text("Tokenet settes i backend-mappen, ikke her. Appen ignorerer "
+                     + "`HF_TOKEN` i miljøet med vilje, så en `export` i "
+                     + "`~/.zshenv` gjelder terminalen og ikke appen. "
+                     + "«Test modelltilgang» sier fra hvis det mangler.")
                     .font(.caption).foregroundStyle(.secondary)
+                // `env -u`, ikke bare `hf auth login`: HF_HOME og HF_TOKEN_PATH
+                // flytter fila kommandoen skriver, og appen har fjernet veien
+                // til den. Uten dette kan kommandoen lykkes og appen likevel
+                // ikke finne noe. Se hfLoginCommand.
+                Text(AppSettings.hfLoginCommand)
+                    .font(.caption.monospaced()).textSelection(.enabled)
                 if LegacyKeychain.hasOrphanedToken {
                     Text("En eldre versjon la et token i nøkkelringen. Det brukes "
                          + "ikke lenger, og blir liggende til du fjerner det:")

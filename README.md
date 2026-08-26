@@ -125,7 +125,7 @@ mentions licenses. It is the most likely first failure anyone hits.
 Give the token to `huggingface_hub` once, in the backend folder:
 
 ```zsh
-.venv/bin/hf auth login
+env -u HF_HOME -u HF_TOKEN_PATH .venv/bin/hf auth login
 ```
 
 The app keeps no token of its own, and it **removes `HF_TOKEN` from the
@@ -138,6 +138,22 @@ would then answer ✓ for a token the next Finder launch does not have.
 
 (Left alone, `huggingface_hub` would read `HF_TOKEN` first and fall back to the
 file. Inside the app that ordering never applies.)
+
+**The `env -u` is what makes the command land where the app looks.** `hf auth
+login` writes to `constants.HF_TOKEN_PATH`, and both variables move that path:
+
+```
+ingen satt              →  ~/.cache/huggingface/token
+HF_HOME=/tmp/hfhome     →  /tmp/hfhome/token
+HF_TOKEN_PATH=/tmp/tok  →  /tmp/tok
+```
+
+Since the app strips both, it only ever reads the first line. A shell that
+exports either one therefore turns the plain `hf auth login` into a command that
+succeeds and still leaves the app with no token — and no amount of repeating it
+helps. If you do relocate `HF_HOME` for the model cache, the token ends up in
+two places, and that is the price of the app behaving the same from Finder as
+from a shell.
 
 Then, in the app — open Settings (⌘,) and point **Backend** at the folder holding
 `transcribe.py` and `.venv/`. That is the only thing to fill in; the token lives

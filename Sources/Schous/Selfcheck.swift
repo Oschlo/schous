@@ -57,9 +57,7 @@ func runSelfcheckAndExit() -> Never {
 
     // sys.exit(melding) i backend går til stderr, ikke stdout.
     job.parseStderr("Fant ikke noe Hugging Face-token.")
-    check(job.state == .failed("Fant ikke noe Hugging Face-token. Appen ignorerer "
-                               + "HF_TOKEN i miljøet med vilje — kjør "
-                               + "`.venv/bin/hf auth login` i backend-mappen."), "hf-token-feil")
+    check(job.state == .failed(AppSettings.hfTokenMissingMessage), "hf-token-feil")
 
     // Miljøet subprosessene får: PATH satt, alle arvede token-variabler borte.
     //
@@ -83,6 +81,20 @@ func runSelfcheckAndExit() -> Never {
           "subprocessEnv arver ikke lenger foreldremiljøet")
     for key in AppSettings.hfEnvKeys { unsetenv(key) }
 
+    // Strippingen over og kommandoen appen anbefaler må være enige. Hver
+    // variabel som flytter *fila* må også være unset i hfLoginCommand — ellers
+    // skriver den dokumenterte kommandoen tokenet dit appen nettopp fjernet
+    // veien til, og rådet virker ikke uansett hvor mange ganger det følges.
+    // Måling bak formen (huggingface_hub.constants):
+    //
+    //     ingen satt              -> ~/.cache/huggingface/token
+    //     HF_HOME=/tmp/hfhome     -> /tmp/hfhome/token
+    //     HF_TOKEN_PATH=/tmp/tok  -> /tmp/tok
+    for key in AppSettings.hfEnvKeys where key.hasSuffix("_HOME") || key.hasSuffix("_PATH") {
+        check(AppSettings.hfLoginCommand.contains("-u \(key)"),
+              "login-kommandoen lar \(key) stå: \(AppSettings.hfLoginCommand)")
+    }
+
     // Rekkefølgen mellom stderr og prosess-slutt, kjørt mot en ekte prosess.
     //
     // To feil satt her. terminationHandler og readabilityHandler køer hver sin
@@ -105,9 +117,7 @@ func runSelfcheckAndExit() -> Never {
         RunLoop.main.run(until: Date().addingTimeInterval(0.02))
         if case .failed = raceJob.state { settled = true }
     }
-    check(raceJob.state == .failed("Fant ikke noe Hugging Face-token. Appen ignorerer "
-                                   + "HF_TOKEN i miljøet med vilje — kjør "
-                                   + "`.venv/bin/hf auth login` i backend-mappen."),
+    check(raceJob.state == .failed(AppSettings.hfTokenMissingMessage),
           "kappløp/EOF: \(raceJob.state)")
 
     // Fristen i capture: en prosess som aldri svarer må gi opp, ikke henge.
