@@ -74,9 +74,18 @@ final class AppSettings: ObservableObject {
     nonisolated static var subprocessEnv: [String: String] {
         var env = ProcessInfo.processInfo.environment
         env["PATH"] = subprocessPATH
+        // torchcodec-wheelene har ingen LC_RPATH, så dyld finner ikke Homebrews
+        // FFmpeg-biblioteker uten hjelp. Symptomet er «NameError: name
+        // 'AudioDecoder' is not defined» i steg 2 — torchaudio svelger
+        // import-feilen og navnet blir aldri bundet. Målt 2026-09-03 med
+        // torchcodec 0.16 mot FFmpeg 9: uten variabelen «Could not load
+        // libtorchcodec», med den dekodes opptaket.
+        env["DYLD_FALLBACK_LIBRARY_PATH"] = ffmpegLibDir
         for key in hfEnvKeys { env.removeValue(forKey: key) }
         return env
     }
+
+    nonisolated static let ffmpegLibDir = "/opt/homebrew/opt/ffmpeg/lib"
 
     /// Alt `huggingface_hub` leser for å finne et token. Egen konstant fordi
     /// `--selfcheck` må kunne slå fast at *hele* lista blir borte, ikke bare
