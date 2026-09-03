@@ -165,6 +165,24 @@ The backend takes a positional source path, `--speakers N`, `--work-dir`,
 - **`PATH` must be set explicitly.** `transcribe.py:31` calls `ffmpeg` with no
   path resolution, and an `.app` launched from Finder does not inherit
   `/opt/homebrew/bin`.
+- **`DYLD_FALLBACK_LIBRARY_PATH` must point at Homebrew's FFmpeg libraries.**
+  The torchcodec wheels ship with no `LC_RPATH` at all (`otool -l` on
+  `libtorchcodec_core9.dylib`: nothing), so dyld has nowhere to look for
+  `libavutil.61.dylib` and friends. The symptom in the app is
+  `NameError: name 'AudioDecoder' is not defined` in step 2 — torchaudio
+  swallows the import failure and the name is never bound. Not a token
+  problem, however much it arrives at the same moment as the first fresh job.
+  Measured 2026-09-03, torchcodec 0.16 against Homebrew FFmpeg 9.0.1, a 20 s
+  clip through the whole backend:
+
+  ```
+  uten variabelen   OSError: Could not load this library: …libtorchcodec_core4.dylib   exit 1
+  med variabelen    diarized 2 talere, done, exit 0
+  ```
+
+  The same variable is needed for terminal runs. torchcodec ≤ 0.14 only
+  knew FFmpeg 4–8, so the backend venv has to be on ≥ 0.16 once Homebrew is
+  on FFmpeg 9; `ffmpeg@8` is an alias for 9 here, not a separate keg.
 - **The app passes no token at all**, on purpose — and it *removes* every
   variable `huggingface_hub` would find one through, in
   `AppSettings.subprocessEnv`, which both the job and the two Settings-buttons
