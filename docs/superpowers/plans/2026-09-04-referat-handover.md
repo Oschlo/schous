@@ -1,6 +1,6 @@
 # Referat — status ved avslutning 2026-09-04 ca. 15:30
 
-Grenen `referat`, ikke pushet. Alle sju tasks i
+Grenen `referat`, pushet til origin (uten PR). Alle sju tasks i
 `docs/superpowers/plans/2026-09-04-referat.md` er implementert, hver med
 task-review (spec + kvalitet) og fikserunder der reviewen fant noe.
 Selfcheck er grønn på HEAD (beb7a83). Det som IKKE er gjort: sluttreview av
@@ -36,12 +36,36 @@ beb7a83  fiksbølge: strupet publisering (≤10 Hz), frist 600 s, README med tal
 - Referatet: norsk, alle seksjoner, ekte navn (null `SPEAKER_`). Modellen
   gjengir malens egen «Context»-instruks øverst → #36.
 
+## Oppsett det ble testet på (for å gjenta et annet sted)
+
+Maskin: Apple M5, 32 GB, macOS 26.6.2. ollama 0.33.3 på `http://localhost:11434`
+(Ollama.app, ikke brew). Modeller som lå installert (`ollama list`):
+
+```
+qwen3.8:27b-mlx                                 nvfp4    18.2 GB   ← ekte referat-kjøring (Discovery interview, norsk)
+NbAiLab/borealis-instruct-preview:12b           Q4_K_M    8.7 GB   ← ble standardmodell i Innstillinger (første i lista), kun vist i picker, ikke kjørt
+NbAiLab/borealis-instruct-preview:4b            Q4_K_M    3.3 GB   ← think:false-målingen i spec-en (modell uten thinking → HTTP 200)
+gemma4:26b-mlx                                  nvfp4    17.6 GB
+gemma4:12b                                      Q4_K_M    7.6 GB   ← tenkesløyfe > 900 s i #32, grunnen til fristen
+qwen3.5:9b                                      Q4_K_M    6.6 GB
+hf.co/BobTheShoplifter/borealis2-26b-a4b-preview-GGUF:Q4_K_M    18.0 GB
+```
+
+Minste oppsett som reproduserer dagens måling: `ollama pull qwen3.8:27b-mlx`
+(krever Apple Silicon med nok minne til 18 GB modell + 18k tokens kontekst;
+32 GB holdt). `--selfcheck` trenger ingen modell og ingen ollama; den bruker
+`nc -l` på 127.0.0.1:11501–11506.
+
+Innstillinger-verdier som ble brukt: `ollamaURL` = standard, `summaryModel` =
+`qwen3.8:27b-mlx` valgt i editoren for kjøringen, `summaryLanguage` = Norsk,
+`summaryPrompt` = standard. Kontekstfeltet stod tomt.
+
 ## Neste steg, i rekkefølge
 
 1. Fiksbølgen er committet (beb7a83) men ikke reviewet — sluttreviewen
    under må lese den med.
 2. Sluttreview av hele grenen (`git diff d294f2b..HEAD`).
-3. `git push -u origin referat`, PR mot main med body fra
+3. PR mot main med body fra
    «PR-body» nederst her,
    `Closes #30`. Ikke merge.
 4. Kommentar på #34 (teksten står i plan Task 7 steg 7).
