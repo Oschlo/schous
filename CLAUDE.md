@@ -359,8 +359,20 @@ Fire ting som er målt og som koden hviler på:
   var appen på 100 % CPU i SwiftUI-layout, fordi hele `SpeakerEditorView`
   tegnes på nytt per token. `summarizer.text` publiseres derfor strupet, maks
   ti ganger i sekundet; `--selfcheck` sender 200 linjer i én pakke og krever
-  under ti publiseringer. Effekten på den varme 27B-kjøringen er ikke målt på
-  nytt — tallet over er *før*.
+  under ti publiseringer. Målt etterpå på M1 Pro (7 716 ord, Stand-Up,
+  samme modell), gjennom appen med `ps` hvert 15. sekund:
+
+  ```
+  0–285 s    prefill, ingen pakker        appen 0–8 % CPU, «Referat … m:ss»
+  285–470 s  strømming                    23 → 52 → 100 % CPU de siste ~75 s
+  470 s      «Referat lagret»             curl med samme prompt-størrelse: 465 s
+  ```
+
+  Appen er altså ferdig i samme åndedrag som ollama, ikke sju minutter etter.
+  CPU-en når likevel 100 % mot slutten: ti re-render i sekundet av en tekst
+  som vokser, og hele `SpeakerEditorView` tegnes fortsatt per publisering
+  (`hasSummary` leser `summarizer.text`). Neste trinn er å la bare
+  `SummaryPanel` observere teksten — når noen måler at det trengs.
 
 `thinking`-feltet i strømmen leses ikke. Slipper det inn, står modellens
 grubling i referatet.

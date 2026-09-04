@@ -153,7 +153,8 @@ PR opprettet mot main, kommentar på #34. Selfcheck var flaky på M1 Pro
 (RST fra nc, a2ee689). Kald prefill her: 309 s til første pakke på 7 716
 ord, under 600 s. Stand-Up-malen gjengir også sin egen instruks (#36).
 
-Ikke gjort: ekte kjøring *gjennom appen* på M1 Pro — `osascript` henger mot
-System Events på denne maskinen (også `get name of every process`), så
-UI-et må klikkes for hånd: «Åpne resultat» → «Lag referat». Det som da er
-umålt er CPU-bruken i appen under varm strømming med strupingen.
+Ekte kjøring gjennom appen på M1 Pro er gjort (System Events trengte
+Accessibility-tilgang for terminalen først; da virker AXPress på knappene,
+og popup-menyene velges med AXPress på menu item): 470 s, «Referat lagret»,
+CPU-tallene står i CLAUDE.md. Nye issues fra runden: #38 (skymodell ble
+standard), #39 (fremdrift), #40 (redesign).
