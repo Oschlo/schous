@@ -476,7 +476,7 @@ private func summarizerNetworkSelfcheck() {
     let reqFile = URL.temporaryDirectory.appending(path: "schous-req-\(getpid()).txt")
     defer { try? FileManager.default.removeItem(at: reqFile) }
     var s = summarize(port: 11501, response: http(200, [thinking, content, done]), out: out, reqFile: reqFile)
-    check(s.text == "hei", "strøm: \(s.text.debugDescription)")
+    check(s.text == "hei", "strøm: \(s.text.debugDescription) state=\(s.state)")
     check(s.state == .done(out), "strøm-state: \(s.state)")
     check((try? String(contentsOf: out, encoding: .utf8)) == "hei", "fila ble ikke skrevet")
     check((try? String(contentsOf: reqFile, encoding: .utf8))?.contains(#""think":false"#) == true,
@@ -544,7 +544,13 @@ private func startServer(port: Int, response: String, hold: Int, reqFile: URL?) 
     let padded = hold > 0
         ? response.replacingOccurrences(of: "Content-Length: ", with: "Content-Length: 9")
         : response
-    let script = "printf '%s' \"$1\" ; sleep \(hold)"
+    // Uten `hold` lever nc et halvt sekund etter svaret likevel. Lukker den i
+    // det stdin når EOF, ligger requesten ofte ulest i mottaksbufferet, og
+    // close() på en socket med ulest data gir RST, ikke FIN — URLSession
+    // kaster da responsen den alt har fått. Målt 2026-09-04 på M1 Pro med
+    // `sleep 0`: 7/25 runder «The network connection was lost»; curl mot
+    // samme nc ser det ikke (0/30), så testen må kjøres med appens klient.
+    let script = "printf '%s' \"$1\" ; sleep \(hold > 0 ? "\(hold)" : "0.5")"
     let p = Process()
     p.executableURL = URL(fileURLWithPath: "/bin/sh")
     p.arguments = ["-c", "(\(script)) | /usr/bin/nc -l 127.0.0.1 \(port)", "sh", padded]
