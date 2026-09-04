@@ -395,6 +395,12 @@ private func summarizerSelfcheck() {
     check(p.contains("MAL") && p.contains("Norwegian") && p.contains("KTX")
           && p.contains("[00:00:04] A (no): Hei.\n"), "prompt mangler en verdi:\n\(p)")
     check(!p.contains("{") && !p.contains("}"), "plassholder står igjen:\n\(p)")
+    // En verdi som selv inneholder «{transcript}» (mulig i en brukerskrevet
+    // mal) skal ikke skannes på nytt av et senere bytte — kjedede
+    // .replacingOccurrences ville gjort nettopp det.
+    let literal = Summary.prompt("x {transcript} y", language: "English", context: "c",
+                                 transcript: "T", using: Summary.defaultPrompt)
+    check(literal.contains("x {transcript} y"), "substituert innhold ble skannet på nytt:\n\(literal)")
     // Tom kontekst blir «(none)», ikke en tom linje modellen kan tolke som noe.
     check(Summary.prompt("m", language: "English", context: "", transcript: "t",
                          using: Summary.defaultPrompt).contains("(none)"),

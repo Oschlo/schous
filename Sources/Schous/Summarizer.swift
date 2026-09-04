@@ -29,16 +29,25 @@ enum Summary {
     {transcript}
     """
 
-    /// Ren strengerstatning. Tom kontekst blir «(none)» så modellen ikke
-    /// får en tom linje å tolke.
+    /// Étt gjennomløp av `form` — en verdi som selv inneholder f.eks.
+    /// «{transcript}» (mulig i en brukerskrevet mal, eller i konteksten)
+    /// skal stå urørt, ikke skannes på nytt av et senere bytte.
     static func prompt(_ template: String, language: String, context: String,
                        transcript: String, using form: String) -> String {
         let ctx = context.trimmingCharacters(in: .whitespacesAndNewlines)
-        return form
-            .replacingOccurrences(of: "{template}", with: template)
-            .replacingOccurrences(of: "{language}", with: language)
-            .replacingOccurrences(of: "{context}", with: ctx.isEmpty ? "(none)" : ctx)
-            .replacingOccurrences(of: "{transcript}", with: transcript)
+        let values = ["template": template, "language": language,
+                      "context": ctx.isEmpty ? "(none)" : ctx, "transcript": transcript]
+        let pattern = try! NSRegularExpression(pattern: #"\{(template|language|context|transcript)\}"#)
+        let ns = form as NSString
+        var result = ""
+        var scanned = 0
+        for match in pattern.matches(in: form, range: NSRange(location: 0, length: ns.length)) {
+            result += ns.substring(with: NSRange(location: scanned, length: match.range.location - scanned))
+            result += values[ns.substring(with: match.range(at: 1))]!
+            scanned = match.range.location + match.range.length
+        }
+        result += ns.substring(from: scanned)
+        return result
     }
 }
 
