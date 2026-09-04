@@ -151,6 +151,10 @@ final class AppSettings: ObservableObject {
     }
     @Published var checkResult: String?
     @Published var checking = false
+    /// Sjekken som går, så «Avbryt» har noe å drepe. Fristen finnes fortsatt;
+    /// knappen er for den som ikke vil vente på den.
+    private var checkProcess: Process?
+    private var cancelling = false
 
     /// Mappa resultatene skrives til. Lå i ContentView; Innstillinger → Generelt
     /// viser den også nå, så den må eies ett sted.
@@ -244,15 +248,28 @@ final class AppSettings: ObservableObject {
         }
         checking = true
         checkResult = nil
+        cancelling = false
         Task.detached {
-            let out = Self.capture(py, args: args, cwd: backend, timeout: timeout)
+            let out = Self.capture(py, args: args, cwd: backend, timeout: timeout) { p in
+                Task { @MainActor in self.checkProcess = p }
+            }
             await MainActor.run {
                 self.checking = false
-                self.checkResult = out.contains(expect)
-                    ? "✓ \(expect)"
-                    : "Feilet: \(out.isEmpty ? "ingen output" : out)"
+                self.checkProcess = nil
+                if self.cancelling {
+                    self.checkResult = "Avbrutt."
+                } else {
+                    self.checkResult = out.contains(expect)
+                        ? "✓ \(expect)"
+                        : "Feilet: \(out.isEmpty ? "ingen output" : out)"
+                }
             }
         }
+    }
+
+    func cancelCheck() {
+        cancelling = true
+        checkProcess?.terminate()
     }
 
     /// Utenfor MainActor: torch-importen og nettkallet tar sekunder, og et
@@ -274,8 +291,11 @@ final class AppSettings: ObservableObject {
     /// Ikke `private`: `--selfcheck` må kunne kjøre den mot noe som henger med
     /// vilje. En frist som aldri er sett utløse er en frist man tror på, ikke
     /// en man vet virker.
+    /// `register` får prosessen rett etter start, så en «Avbryt»-knapp kan
+    /// drepe den. Samme vei ut som fristen: terminate() lukker røret.
     nonisolated static func capture(_ py: URL, args: [String], cwd: URL,
-                                    timeout: TimeInterval) -> String {
+                                    timeout: TimeInterval,
+                                    register: (@Sendable (Process) -> Void)? = nil) -> String {
         let p = Process()
         p.executableURL = py
         p.arguments = args
@@ -290,6 +310,7 @@ final class AppSettings: ObservableObject {
         } catch {
             return "Kunne ikke starte python: \(error.localizedDescription)"
         }
+        register?(p)
         // Drepes utenfra når fristen går. `terminate()` lukker skriveenden, så
         // readDataToEndOfFile under får EOF og slipper taket — uten dette ville
         // en frist ikke hjulpet, for det er *lesingen* som henger, ikke ventingen.
@@ -320,131 +341,5 @@ final class AppSettings: ObservableObject {
             return "Prosessen ble drept (signal \(p.terminationStatus)).\n" + text
         }
         return p.terminationStatus == 0 ? text : "kode \(p.terminationStatus): " + text
-    }
-}
-
-struct SettingsView: View {
-    @ObservedObject var settings = AppSettings.shared
-
-    var body: some View {
-        Form {
-            Section("Backend") {
-                HStack {
-                    TextField("mac-local-transcribe-with-diarization", text: $settings.backendPath)
-                        .textFieldStyle(.roundedBorder)
-                    Button("Velg…", action: pickBackend)
-                }
-                HStack {
-                    Button("Test backend", action: settings.runSelfcheck)
-                    Button("Test modelltilgang", action: settings.runAccessCheck)
-                    if settings.checking { ProgressView().controlSize(.small) }
-                }
-                if let r = settings.checkResult {
-                    Text(r).font(.caption).textSelection(.enabled)
-                        .foregroundStyle(r.hasPrefix("✓") ? .green : .red)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Text("«Test backend» er lokal: ffmpeg, torch, pyannote, mlx-whisper. "
-                     + "«Test modelltilgang» spør Hugging Face om tokenet lever og om "
-                     + "modell-lisensene er godtatt — den eneste sjekken som bruker nett.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Section("Eksportformater") {
-                ForEach(OutputFormat.allCases) { f in
-                    Toggle(f.label, isOn: Binding(
-                        get: { settings.formats.contains(f) },
-                        set: { on in
-                            if on { settings.formats.insert(f) } else { settings.formats.remove(f) }
-                        }))
-                }
-                Text("Hva «Lagre» skriver som standard. Menyen på Lagre-knappen "
-                     + "kan skrive ett enkelt format uten å endre dette.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Section("Referat") {
-                TextField("ollama-URL", text: $settings.ollamaURL)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit { Task { await settings.refreshModels() } }
-                HStack {
-                    if let models = settings.models {
-                        Picker("Standardmodell", selection: $settings.summaryModel) {
-                            ForEach(models, id: \.self) { Text($0).tag($0) }
-                            // Lagret modell som ikke finnes lenger: vis den, så
-                            // valget ikke stille byttes til noe annet.
-                            if !settings.summaryModel.isEmpty, !models.contains(settings.summaryModel) {
-                                Text("\(settings.summaryModel) (ikke installert)").tag(settings.summaryModel)
-                            }
-                        }
-                    } else {
-                        Text("ollama svarer ikke på \(settings.ollamaURL)")
-                            .font(.caption).foregroundStyle(.orange)
-                    }
-                    Button("Hent modeller") { Task { await settings.refreshModels() } }
-                }
-                Picker("Standardspråk", selection: $settings.summaryLanguage) {
-                    ForEach(SummaryLanguage.allCases) { Text($0.label).tag($0) }
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Prompt").font(.caption).foregroundStyle(.secondary)
-                    TextEditor(text: $settings.summaryPrompt)
-                        .font(.caption.monospaced())
-                        .frame(height: 160)
-                    HStack {
-                        Text("{template} {language} {context} {transcript} byttes ut før sending. "
-                             + "Det som står her er nøyaktig det som sendes.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Spacer()
-                        Button("Tilbakestill") { settings.summaryPrompt = Summary.defaultPrompt }
-                            .disabled(settings.summaryPrompt == Summary.defaultPrompt)
-                    }
-                }
-                Button("Åpne malmappe") { Templates.open() }
-                Text("Én *.md per mal. Filnavnet er malnavnet. Referatet skrives som "
-                     + "<fil>.<mal>.md i output-mappa.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Section("Hugging Face") {
-                // Ikke et felt: tokenet eies av huggingface_hub, som leser
-                // HF_TOKEN og faller tilbake på ~/.cache/huggingface/token.
-                // En egen kopi her måtte ligge i Keychain, og den ACL-en er
-                // nøklet på cdhash — altså én dialog per build. Se #26.
-                Text("Tokenet settes i backend-mappen, ikke her. Appen ignorerer "
-                     + "`HF_TOKEN` i miljøet med vilje, så en `export` i "
-                     + "`~/.zshenv` gjelder terminalen og ikke appen. "
-                     + "«Test modelltilgang» sier fra hvis det mangler.")
-                    .font(.caption).foregroundStyle(.secondary)
-                // `env -u`, ikke bare `hf auth login`: HF_HOME og HF_TOKEN_PATH
-                // flytter fila kommandoen skriver, og appen har fjernet veien
-                // til den. Uten dette kan kommandoen lykkes og appen likevel
-                // ikke finne noe. Se hfLoginCommand.
-                Text(AppSettings.hfLoginCommand)
-                    .font(.caption.monospaced()).textSelection(.enabled)
-                if LegacyKeychain.hasOrphanedToken {
-                    Text("En eldre versjon la et token i nøkkelringen. Det brukes "
-                         + "ikke lenger, og blir liggende til du fjerner det:")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Text(LegacyKeychain.removeCommand)
-                        .font(.caption.monospaced()).textSelection(.enabled)
-                }
-            }
-        }
-        .task { await settings.refreshModels() }
-        // Hele skjemaet, ikke bare knappene: sjekken kjører på stien slik den
-        // var da den startet, så et felt som kan endres mens den går, gir et
-        // grønt svar på noe som aldri ble sjekket.
-        .disabled(settings.checking)
-        .formStyle(.grouped)
-        .frame(width: 480)
-        .padding(.vertical, 8)
-    }
-
-    private func pickBackend() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.prompt = "Velg"
-        if panel.runModal() == .OK, let url = panel.url {
-            settings.backendPath = url.path   // nullstiller checkResult selv
-        }
     }
 }

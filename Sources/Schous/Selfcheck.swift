@@ -148,6 +148,18 @@ func runSelfcheckAndExit() -> Never {
     check(hung.hasPrefix("Ga opp etter 1 s"), "frist ga ikke opp: \(hung.prefix(60))")
     check(hangElapsed < 3, "frist brukte \(hangElapsed) s — drepte ikke prosessen")
 
+    // Avbryt: en sjekk som står og venter må kunne stoppes fra knappen, ikke
+    // bare av fristen. Samme kontroll som over — /bin/sleep overlever alt
+    // annet enn å bli drept.
+    final class Box: @unchecked Sendable { var p: Process? }
+    let box = Box()
+    let cancelStart = Date()
+    DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) { box.p?.terminate() }
+    let cancelled = AppSettings.capture(URL(fileURLWithPath: "/bin/sleep"), args: ["5"],
+                                        cwd: URL.temporaryDirectory, timeout: 10) { box.p = $0 }
+    check(Date().timeIntervalSince(cancelStart) < 3, "avbrudd drepte ikke prosessen")
+    check(cancelled.hasPrefix("Prosessen ble drept"), "avbrudd: \(cancelled.prefix(40))")
+
     // Og den må ikke slå til på noe som svarer i tide, ellers er den bare en
     // ny måte å feile på.
     let quick = AppSettings.capture(URL(fileURLWithPath: "/bin/echo"), args: ["hei"],
