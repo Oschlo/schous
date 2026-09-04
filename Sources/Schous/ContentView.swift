@@ -27,11 +27,8 @@ struct ContentView: View {
         .animation(.default, value: job.state)
         // Et ferdig menylinje-opptak forhåndsvelges, klart til å transkriberes.
         .onReceive(Recorder.shared.$lastRecording.compactMap { $0 }) { input = $0 }
-        // Ny fil mens editoren står framme: body velges på job.state, ikke på
-        // input, så uten dette ser valget ut som om det ikke skjedde.
-        .onChange(of: input) { _, _ in if job.state == .done { leaveEditor() } }
         // Finder «Åpne med» og fil sluppet på Dock-ikonet (CFBundleDocumentTypes).
-        .onOpenURL { if !isBusy { input = $0 } }
+        .onOpenURL { if !isBusy { open($0) } }
         .onReceive(NotificationCenter.default.publisher(for: .openFile)) { _ in
             if !isBusy { pickInput() }
         }
@@ -221,7 +218,16 @@ struct ContentView: View {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.audio, .movie, .mpeg4Movie]
         panel.prompt = "Velg"
-        if panel.runModal() == .OK { input = panel.url }
+        if panel.runModal() == .OK, let url = panel.url { open(url) }
+    }
+
+    /// Ny fil valgt med vilje: body velges på job.state, ikke på input, så
+    /// editoren må forlates eksplisitt. Et ferdig opptak (`lastRecording`) går
+    /// ikke hit — det bare forhåndsvelges, ellers rev opptaksstoppet ned
+    /// editoren midt i talernavn som ikke var lagret, og avbrøt et referat.
+    private func open(_ url: URL) {
+        input = url
+        if job.state == .done { leaveEditor() }
     }
 
     private func pickOutput() {
