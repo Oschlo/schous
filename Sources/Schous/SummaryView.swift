@@ -64,16 +64,31 @@ struct SummaryControls: View {
         }
         .task {
             Templates.seedIfMissing()
-            templates = Templates.list()
-            template = templates.first
+            rescanTemplates()
             language = settings.summaryLanguage
-            if settings.models == nil { await settings.refreshModels() }
-            model = settings.summaryModel.isEmpty ? (settings.models?.first ?? "") : settings.summaryModel
+            // Alt som kan skrives i må stå klart *før* ventingen på ollama:
+            // den kan ta 5 s, og feltet er ikke sperret imens.
             if let dir = jobDir,
                let saved = try? String(contentsOf: dir.appending(path: "context.txt"), encoding: .utf8) {
                 context = saved
             }
+            if settings.models == nil { await settings.refreshModels() }
+            // Standardmodellen kan være avinstallert siden sist; da har den
+            // ingen tag i Picker-en, og knappen ville sendt et 404.
+            let models = settings.models ?? []
+            model = models.contains(settings.summaryModel) ? settings.summaryModel : (models.first ?? "")
         }
+        // «Åpne malmappe» går til Finder; når vi får fokus igjen er mappa
+        // kanskje ikke tom lenger.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            rescanTemplates()
+        }
+    }
+
+    private func rescanTemplates() {
+        templates = Templates.list()
+        if let template, templates.contains(template) { return }
+        template = templates.first
     }
 
     /// Statusen står under knappen, ikke i verktøylinja: det er her blikket
