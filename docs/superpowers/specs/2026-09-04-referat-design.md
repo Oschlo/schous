@@ -47,7 +47,7 @@ fristen og `think` er ikke valgfrie.
 ContentView, TranscriptionJob, Segment og Selfcheck.
 
 ```
-SpeakerEditorView ──「Lag referat」──▶ ark: mal · modell · språk · kontekst
+SpeakerEditorView ──「Lag referat」──▶ sidefelt: mal · modell · språk · kontekst
         │                                        │
         │ resolved (SPEAKER_00 → navn)           ▼
         └──────────────────────────────▶ Summarizer.run(...)
@@ -160,7 +160,7 @@ malnavnet i små bokstaver med mellomrom byttet til `-`:
 
 **Seeding.** `Resources/templates/` i repoet inneholder `Customer Call.md`,
 `Discovery interview.md` og `Stand-Up.md`, kopiert inn av `bundle.sh`. Ved
-første behov (arket åpnes, eller Innstillinger) kopieres de til mappa over
+første behov (editoren åpnes, eller Innstillinger) kopieres de til mappa over
 *hvis mappa ikke finnes*. En tom mappe seedes ikke: den som sletter alle
 malene har ment det.
 
@@ -198,23 +198,65 @@ Alt i `UserDefaults`: `ollamaURL`, `summaryModel`, `summaryLanguage`,
 
 ## Editoren
 
-Knapp **«Lag referat»** ved siden av «Lagre». Åpner et ark (`.sheet`) med
-mal (Picker over mappa), modell (Picker fra `/api/tags`, forhåndsvalgt fra
+Editoren har allerede riktig grunnform: innhold til venstre, handlinger til
+høyre. Referatet legges inn i den forma i stedet for ved siden av den.
+Høyrekolonnen er hele arbeidsflyten ovenfra og ned, venstrekolonnen viser det
+steget produserer.
+
+```
+┌ Schous — Opptak-2026-08-26-1301 ─────────────────────────────────────────────┐
+│ ‹ Tilbake            Lagret TXT, SRT i meeting notes            [ Lagre ▾ ]  │
+├────────────────────────────────────┬─────────────────────────────────────────┤
+│  ( Transkripsjon | Referat )       │  Talere                                 │
+│                                    │   ● SPEAKER_00   [ Hans Martin      ]   │
+│  00:00:07  Hans Martin  en         │     Egen person ▾                       │
+│  Mm-hmm.                           │                                         │
+│                                    │  Referat                                │
+│                                    │   Mal      [ Stand-Up          ▾ ]      │
+│                                    │   Modell   [ qwen3.8:27b-mlx   ▾ ]      │
+│                                    │   Språk    [ Norsk             ▾ ]      │
+│                                    │   Kontekst [                     ]      │
+│                                    │            [ Lag referat ]              │
+│                                    │   Referat lagret · Vis i Finder         │
+└────────────────────────────────────┴─────────────────────────────────────────┘
+```
+
+**Sidefeltet får seksjonen «Referat» under «Talere»**, ikke et ark. Mal
+(Picker over mappa), modell (Picker fra `/api/tags`, forhåndsvalgt fra
 Innstillinger), språk (forhåndsvalgt), kontekst (`TextEditor`, lastet fra
-`context.txt` hvis den finnes), og «Lag referat» / «Avbryt».
+`context.txt` hvis den finnes), og knappen «Lag referat». Et ark ville skjult
+transkripsjonen i det øyeblikket du skal skrive hvem som var med, og
+rekkefølgen «navngi, så lag referat» må da forklares i stedet for å stå der.
 
-Ingen maler i mappa: arket sier det og tilbyr «Åpne malmappe». Modellista
-tom: arket sier at ollama ikke svarer, og knappen er deaktivert.
+Ingen maler i mappa: seksjonen sier det og tilbyr «Åpne malmappe».
+Modellista tom: seksjonen sier at ollama ikke svarer, og knappen er
+deaktivert.
 
-Når kjøringen starter, lukkes arket og et panel under transkripsjonen
-(`VSplitView` i transkripsjonskolonnen) viser `summarizer.text` med
-markerbar tekst. Toolbar-status viser «Referat … {sek} s» underveis, og
-«Referat lagret som {fil}» med knappen «Vis i Finder» etterpå. «Lag referat»
-er «Stopp» mens det kjører. Navnene tas fra `resolved` i det øyeblikket
-kjøringen starter; endrer du et navn etterpå, er det en ny kjøring.
+**«Lag referat» lagrer først.** Navnene fryses i det øyeblikket kjøringen
+starter, så det er det naturlige punktet å skrive TXT/SRT/JSON til
+utdatamappa, samme `save(AppSettings.shared.formats)` som «Lagre». Feiler
+lagringen, starter ikke referatet. «Lagre» står igjen for den som vil lagre
+uten referat, eller lagre på nytt etter en navneendring. Endrer du et navn
+etter at referatet er laget, er det en ny kjøring.
 
-Panelet viser et tidligere `summary.<slug>.md` fra jobbmappa når editoren
+**Referatet er en fane i venstrekolonnen**, ikke en `VSplitView`. En
+segmentert `Picker` «Transkripsjon | Referat» øverst i kolonnen; Referat-fanen
+finnes bare når det er tekst å vise. Når kjøringen starter, byttes til
+Referat og `summarizer.text` strømmer inn i full høyde, markerbar. To
+scrollfelt som deler høyden ville gitt to små vinduer på én lang
+transkripsjon og ett langt referat.
+
+Mens det kjører er knappen «Stopp», og under den står «Referat … {sek} s».
+Etterpå «Referat lagret som {fil}» med «Vis i Finder». Feil vises samme sted,
+rødt. Verktøylinjas status brukes bare til «Lagret …» som i dag.
+
+Fanen viser et tidligere `summary.<slug>.md` fra jobbmappa når editoren
 åpnes med en jobb som har ett. Finnes flere, vises det nyeste.
+
+**Verktøylinja**: «Ny fil» blir «‹ Tilbake» i leading-posisjon. Det er det
+knappen allerede gjør: jobben settes til idle, fila står fortsatt valgt i
+oppsettet, og bytte fil skjer der. Vinduet får `navigationTitle(job.base)`,
+så hva du ser på står i tittelen i stedet for ingen steder.
 
 ## Gammel jobb uten ny transkribering
 
