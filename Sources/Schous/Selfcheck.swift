@@ -162,6 +162,25 @@ func runSelfcheckAndExit() -> Never {
     check(transcriptText(segs, names: ["SPEAKER_00": "Hans Martin"]) == txt,
           "transcriptText avviker fra txt-eksporten")
 
+    // «Åpne resultat»: ferdig output i jobbmappa uten partial-fil = kan lastes
+    // uten å transkribere på nytt. Med partial-fil er forrige kjøring ikke
+    // ferdig, og da skal Start få gjenoppta den.
+    let fakeInput = dir.appending(path: "selfcheck-input.m4a")
+    let fakeJob = TranscriptionJob.jobDirectory(for: fakeInput)
+    try! FileManager.default.createDirectory(at: fakeJob.appending(path: "output"), withIntermediateDirectories: true)
+    try! FileManager.default.createDirectory(at: fakeJob.appending(path: "work"), withIntermediateDirectories: true)
+    check(TranscriptionJob.finishedOutput(for: fakeInput) == nil, "ingen output skal gi nil")
+    try! JSONEncoder().encode(segs).write(to: fakeJob.appending(path: "output/selfcheck-input.json"))
+    check(TranscriptionJob.finishedOutput(for: fakeInput) != nil, "ferdig output ble ikke funnet")
+    try! Data().write(to: fakeJob.appending(path: "work/selfcheck-input.partial.jsonl"))
+    check(TranscriptionJob.finishedOutput(for: fakeInput) == nil, "partial-fil skal bety ikke ferdig")
+    try! FileManager.default.removeItem(at: fakeJob.appending(path: "work/selfcheck-input.partial.jsonl"))
+    let loaded = TranscriptionJob()
+    loaded.loadFinished(input: fakeInput)
+    check(loaded.state == .done && loaded.segments.count == 1 && loaded.base == "selfcheck-input",
+          "loadFinished: \(loaded.state) \(loaded.segments.count) \(loaded.base)")
+    try? FileManager.default.removeItem(at: fakeJob)
+
     let srt = try! String(contentsOf: dir.appending(path: "t.srt"), encoding: .utf8)
     check(srt == "1\n00:00:04,216 --> 00:00:07,905\nHans Martin (sv): Hei.\n\n",
           "srt: \(srt.debugDescription)")

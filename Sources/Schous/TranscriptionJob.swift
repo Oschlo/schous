@@ -79,6 +79,34 @@ final class TranscriptionJob: ObservableObject {
         supervise(p)
     }
 
+    /// Ferdig output for `input` i jobbmappa, eller nil. Partial-fila betyr at
+    /// forrige kjøring ikke ble ferdig; da skal Start få gjenoppta, ikke dette.
+    static func finishedOutput(for input: URL) -> URL? {
+        let base = input.deletingPathExtension().lastPathComponent
+        let dir = jobDirectory(for: input)
+        let json = dir.appending(path: "output/\(base).json")
+        let partial = dir.appending(path: "work/\(base).partial.jsonl")
+        let fm = FileManager.default
+        return fm.fileExists(atPath: json.path) && !fm.fileExists(atPath: partial.path) ? json : nil
+    }
+
+    /// Laster en ferdig jobb rett inn i editoren. Egen knapp, ikke en snarvei
+    /// i start(): den som endrer «Talere» og trykker Start skal få en ny
+    /// kjøring, ikke forrige svar.
+    func loadFinished(input: URL) {
+        guard let json = Self.finishedOutput(for: input) else { return }
+        base = input.deletingPathExtension().lastPathComponent
+        jobDir = Self.jobDirectory(for: input)
+        do {
+            segments = try JSONDecoder().decode([Segment].self, from: Data(contentsOf: json))
+            step = 4
+            detail = "\(segments.count) segmenter"
+            state = .done
+        } catch {
+            state = .failed("\(json.lastPathComponent) kunne ikke leses: \(error.localizedDescription)")
+        }
+    }
+
     /// Kobler rør, linjeparsing og terminering på `p`, og starter den.
     ///
     /// Skilt ut fra `start()` med vilje: uten en slik inngang kan `--selfcheck`
