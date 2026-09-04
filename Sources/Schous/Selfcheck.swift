@@ -11,6 +11,7 @@ func runSelfcheckAndExit() -> Never {
     updateSelfcheck()
     summarizerSelfcheck()
     summarizerNetworkSelfcheck()
+    estimatesSelfcheck()
 
     let job = TranscriptionJob()
 
@@ -33,10 +34,14 @@ func runSelfcheckAndExit() -> Never {
 
     job.parseStdout(#"{"event": "step", "step": 3, "name": "språk per taler"}"#)
     job.parseStdout(#"{"event": "language", "completed": 1, "total": 3, "speaker": "SPEAKER_00", "language": "sv"}"#)
-    check(job.step == 3 && job.detail == "taler 1/3 — SPEAKER_00: sv", "steg 3: \(job.detail)")
+    check(job.step == 3 && job.detail == "taler 1 av 3 · SPEAKER_00: sv", "steg 3: \(job.detail)")
 
     job.parseStdout(#"{"event": "step", "step": 4, "name": "transkriberer"}"#)
     check(job.step == 4, "steg 4, fikk \(job.step)")
+    // Navnet i UI sier hva brukeren får; backendens ord står i Detaljer.
+    check(TranscriptionJob.stepNames[2] == "Finner talere" && job.stepLabel == "Transkriberer",
+          "stegnavn på norsk: \(job.stepLabel)")
+    check(TranscriptionJob.technicalNames[2] == "diarization", "teknisk navn til Detaljer")
 
     job.parseStdout(#"{"event": "progress", "step": 4, "completed": 214, "total": 509, "speaker": "SPEAKER_00", "language": "no"}"#)
     check(job.done == 214 && job.total == 509, "steg 4: \(job.done)/\(job.total)")
@@ -403,6 +408,35 @@ private func mix(_ sources: [(channels: Int, samples: [Float])], capacity: Int =
 infix operator ≈: ComparisonPrecedence
 private func ≈ (a: [Float], b: [Float]) -> Bool {
     a.count == b.count && zip(a, b).allSatisfy { abs($0 - $1) < 1e-6 }
+}
+
+/// Estimatene i #39: rater fra forrige kjøring, i en egen defaults-suite så
+/// selfcheck aldri rører brukerens tall.
+private func estimatesSelfcheck() {
+    let suite = "co.oschlo.schous.selfcheck-\(getpid())"
+    let d = UserDefaults(suiteName: suite)!
+    defer { d.removePersistentDomain(forName: suite) }
+    check(Estimates.stepEstimate(2, audioSeconds: 600, in: d) == nil, "uten historikk skal steg-estimatet være nil")
+    // 10 min lyd tok 4 min i steg 2 → 0,4 s per lydsekund → 20 min lyd anslås til 8 min.
+    Estimates.recordStep(2, seconds: 240, audioSeconds: 600, in: d)
+    check(Estimates.stepEstimate(2, audioSeconds: 1200, in: d).map { abs($0 - 480) < 1e-6 } == true,
+          "steg-estimat: \(String(describing: Estimates.stepEstimate(2, audioSeconds: 1200, in: d)))")
+    check(Estimates.stepEstimate(4, audioSeconds: 1200, in: d) == nil, "steg 4 har ingen historikk ennå")
+    // Uten lydlengde finnes ingen rate å lagre.
+    Estimates.recordStep(3, seconds: 5, audioSeconds: 0, in: d)
+    check(Estimates.stepEstimate(3, audioSeconds: 100, in: d) == nil, "rate uten lydlengde skal ikke lagres")
+
+    check(Estimates.summaryEstimate(model: "m", promptChars: 1000, in: d) == nil,
+          "uten historikk skal referat-estimatet være nil")
+    // 11 s lasting + 297 s prefill på 40 000 tegn (målt i #39) → 20 000 tegn anslås til 11 + 148,5.
+    Estimates.recordSummary(model: "m", loadSeconds: 11, promptSeconds: 297, promptChars: 40_000, in: d)
+    check(Estimates.summaryEstimate(model: "m", promptChars: 20_000, in: d).map { abs($0 - 159.5) < 1e-6 } == true,
+          "referat-estimat: \(String(describing: Estimates.summaryEstimate(model: "m", promptChars: 20_000, in: d)))")
+    check(Estimates.summaryEstimate(model: "annen", promptChars: 20_000, in: d) == nil, "raten er per modell")
+
+    check(Estimates.describe(20) == "under ett minutt", Estimates.describe(20))
+    check(Estimates.describe(200) == "ca. 3 min", Estimates.describe(200))
+    check(Estimates.describe(4200) == "ca. 1 t 10 min", Estimates.describe(4200))
 }
 
 /// Referat: plassholdere, slug og seeding. Selve nettkallet testes i

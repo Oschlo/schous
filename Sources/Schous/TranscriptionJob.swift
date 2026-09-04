@@ -29,7 +29,24 @@ final class TranscriptionJob: ObservableObject {
     private(set) var jobDir: URL?
     private(set) var base = ""
 
-    static let stepNames = ["", "Lyd", "Diarization", "Språk per taler", "Transkriberer"]
+    /// Det brukeren får, ikke hva algoritmen heter: «Finner talere», ikke
+    /// «Diarization». Backendens egne ord står i `technicalNames`, til Detaljer.
+    static let stepNames = ["", "Forbereder lyd", "Finner talere", "Finner språk", "Transkriberer"]
+    static let technicalNames = ["", "lyd", "diarization", "språk per taler", "transkriberer"]
+
+    private(set) var input: URL?
+    /// Lydlengden i sekunder, fra AVURLAsset i ContentView. 0 = ukjent; da
+    /// lagres ingen rate og vises ingen anslag.
+    private(set) var audioSeconds: Double = 0
+    @Published private(set) var stepStarted: Date?
+
+    /// Gjenstående i gjeldende steg fra forrige kjørings rate, eller nil.
+    /// Steg 4 har et ekte anslag (`eta`) fra segmenttellingen og bruker ikke dette.
+    var stepEstimate: TimeInterval? {
+        guard let t0 = stepStarted,
+              let total = Estimates.stepEstimate(step, audioSeconds: audioSeconds) else { return nil }
+        return max(0, total - Date().timeIntervalSince(t0))
+    }
 
     /// Steg 2 rapporterer nå fremdrift per understeg, ikke bare steg 4.
     /// Baren fylles og nullstilles per understeg i steg 2; det er med vilje.
@@ -42,7 +59,7 @@ final class TranscriptionJob: ObservableObject {
 
     // MARK: - Start
 
-    func start(input: URL, speakers: Int?) {
+    func start(input: URL, speakers: Int?, audioSeconds: Double = 0) {
         let settings = AppSettings.shared
         guard let backend = settings.backendURL, let python = settings.pythonURL,
               FileManager.default.isExecutableFile(atPath: python.path) else {
@@ -51,6 +68,8 @@ final class TranscriptionJob: ObservableObject {
         }
 
         base = input.deletingPathExtension().lastPathComponent
+        self.input = input
+        self.audioSeconds = audioSeconds
         let dir = Self.jobDirectory(for: input)
         jobDir = dir
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -60,6 +79,7 @@ final class TranscriptionJob: ObservableObject {
         done = 0; total = 0; eta = ""; detail = ""; speakerCount = 0
         step = 1
         stepLabel = Self.stepNames[1]
+        stepStarted = Date()
         state = .running
 
         let p = Process()
@@ -96,6 +116,7 @@ final class TranscriptionJob: ObservableObject {
     func loadFinished(input: URL) {
         guard let json = Self.finishedOutput(for: input) else { return }
         base = input.deletingPathExtension().lastPathComponent
+        self.input = input
         jobDir = Self.jobDirectory(for: input)
         do {
             segments = try JSONDecoder().decode([Segment].self, from: Data(contentsOf: json))
@@ -269,10 +290,12 @@ final class TranscriptionJob: ObservableObject {
     func apply(_ e: Event) {
         switch e.event {
         case "step":
+            closeStep()
             step = e.step ?? step
             stepLabel = Self.stepNames[(1...4).contains(step) ? step : 0]
             detail = ""
             done = 0
+            stepStarted = Date()
             if step == 4 { step4Start = Date() }
         case "progress":
             done = e.completed ?? done
@@ -288,16 +311,26 @@ final class TranscriptionJob: ObservableObject {
             speakerCount = e.speakers ?? 0
             detail = "\(total) segmenter, \(speakerCount) talere"
         case "language":
-            detail = "taler \(e.completed ?? 0)/\(e.total ?? 0) — "
+            detail = "taler \(e.completed ?? 0) av \(e.total ?? 0) · "
                 + "\(e.speaker ?? "?"): \(e.language ?? "?")"
         case "resume":
             detail = "gjenopptar \(e.completed ?? 0) ferdige segmenter"
         case "done", "interrupted":
+            closeStep()
             detail = ""
             eta = ""
         default:
             break
         }
+    }
+
+    /// Skriver ned hvor lang tid steget tok, som rate mot lydlengden — det er
+    /// anslaget neste kjøring viser. Et avbrutt steg («interrupted») lagres
+    /// også; raten blir for lav, og retter seg ved neste hele kjøring.
+    private func closeStep() {
+        guard let t0 = stepStarted, (1...4).contains(step) else { return }
+        Estimates.recordStep(step, seconds: Date().timeIntervalSince(t0), audioSeconds: audioSeconds)
+        stepStarted = nil
     }
 
     /// ponytail: enkelt snitt siden steg 4 startet. Ved gjenopptagelse flyr de
