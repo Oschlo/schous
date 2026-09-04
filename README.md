@@ -170,7 +170,9 @@ Two buttons check the two halves — the install and the token:
 
 ## Use
 
-1. Drop an audio or video file into the window, or pick one.
+1. Drop an audio or video file anywhere in the window, or pick one with
+   **Velg fil…** (⌘O). Schous is also listed under **Open With** in Finder, and
+   a file dropped on the Dock icon opens the same way.
 2. Choose the output folder. Give the speaker count if you know it (blank = automatic).
 3. **Start transkribering.** Progress shows steps 1–4, with a segment counter in
    step 4 and per-substep progress in step 2.
@@ -178,7 +180,27 @@ Two buttons check the two halves — the install and the token:
    **Stopp** ends it — the segments transcribed so far are written out, and
    starting again continues where it left off.
 5. When it finishes: name the speakers, merge IDs that are the same person, and
-   **Lagre**.
+   **Lagre** (⌘S). Speakers and the summary controls sit in an inspector on the
+   right; the toolbar button (or ⌘⌥T) hides and shows it. **Vis i Finder**
+   appears next to the save status.
+
+If the app is in the background when a transcription or summary finishes, the
+Dock icon bounces once.
+
+### Keyboard shortcuts
+
+| Action | Shortcut |
+|---|---|
+| Open a file | ⌘O |
+| Start transcription | ⌘↩ |
+| Pause / resume | ⌘⇧P |
+| Stop | ⌘. |
+| Save | ⌘S |
+| Back to setup | ⌘↑ |
+| Show / hide speakers | ⌘⌥T |
+| Make summary | ⌘⇧R |
+| Start / stop recording, from any app | ⌃⌥R |
+| Settings | ⌘, |
 
 ![Step 4 of 4: a progress bar, a segment counter, an estimate of the time left,
 and the speaker and language of the segment being transcribed](docs/progress.png)
@@ -218,8 +240,9 @@ The microphone icon in the menu bar records **system audio and the microphone at
 the same time** — everything you hear from video, web meetings and phone calls,
 plus your own voice.
 
-1. **Start opptak.** The icon becomes a recording ring and the menu shows a timer.
-2. **Stopp opptak.** The two sources are mixed to one mono file,
+1. **Start opptak** — or press **⌃⌥R** from whatever app you are in. The icon
+   becomes a recording ring and the menu shows a timer.
+2. **Stopp opptak**, or ⌃⌥R again. The two sources are mixed to one mono file,
    `Opptak-2026-08-10-1432.m4a`, in the same folder chosen under "Lagre i".
 3. The window comes forward with the recording preselected. From there it is
    ordinary transcription — you decide whether and when.
