@@ -8,6 +8,7 @@ func runSelfcheckAndExit() -> Never {
     segmentSelfcheck()
     recorderSelfcheck()
     updateSelfcheck()
+    summarizerSelfcheck()
 
     let job = TranscriptionJob()
 
@@ -381,6 +382,43 @@ private func mix(_ sources: [(channels: Int, samples: [Float])], capacity: Int =
 infix operator ≈: ComparisonPrecedence
 private func ≈ (a: [Float], b: [Float]) -> Bool {
     a.count == b.count && zip(a, b).allSatisfy { abs($0 - $1) < 1e-6 }
+}
+
+/// Referat: plassholdere, slug og seeding. Selve nettkallet testes i
+/// summarizerNetworkSelfcheck mot en ekte socket.
+@MainActor
+private func summarizerSelfcheck() {
+    // Alle fire byttes, og ingen krøllparentes står igjen — en glemt
+    // plassholder ville gått rett til modellen som tekst.
+    let p = Summary.prompt("MAL", language: "Norwegian", context: "KTX",
+                           transcript: "[00:00:04] A (no): Hei.\n", using: Summary.defaultPrompt)
+    check(p.contains("MAL") && p.contains("Norwegian") && p.contains("KTX")
+          && p.contains("[00:00:04] A (no): Hei.\n"), "prompt mangler en verdi:\n\(p)")
+    check(!p.contains("{") && !p.contains("}"), "plassholder står igjen:\n\(p)")
+    // Tom kontekst blir «(none)», ikke en tom linje modellen kan tolke som noe.
+    check(Summary.prompt("m", language: "English", context: "", transcript: "t",
+                         using: Summary.defaultPrompt).contains("(none)"),
+          "tom kontekst skal bli (none)")
+    check(SummaryLanguage.norwegian.promptValue == "Norwegian"
+          && SummaryLanguage.english.promptValue == "English", "språkverdier")
+
+    check(Templates.slug("Customer Call") == "customer-call", "slug: \(Templates.slug("Customer Call"))")
+    check(Templates.slug("Stand-Up") == "stand-up", "slug: \(Templates.slug("Stand-Up"))")
+    check(Templates.slug("Discovery interview") == "discovery-interview", "slug med små bokstaver")
+
+    // Seeding: kopierer bare når mappa ikke finnes. En tom mappe er et valg.
+    let root = URL.temporaryDirectory.appending(path: "schous-templates-\(getpid())")
+    let seeds = root.appending(path: "seeds")
+    try! FileManager.default.createDirectory(at: seeds, withIntermediateDirectories: true)
+    try! "# Stand-Up\n".write(to: seeds.appending(path: "Stand-Up.md"), atomically: true, encoding: .utf8)
+    let dir = root.appending(path: "templates")
+    Templates.seedIfMissing(into: dir, from: seeds)
+    check(Templates.list(in: dir).map(\.lastPathComponent) == ["Stand-Up.md"],
+          "seeding kopierte ikke: \(Templates.list(in: dir))")
+    try! FileManager.default.removeItem(at: dir.appending(path: "Stand-Up.md"))
+    Templates.seedIfMissing(into: dir, from: seeds)
+    check(Templates.list(in: dir).isEmpty, "tom mappe ble seedet på nytt")
+    try? FileManager.default.removeItem(at: root)
 }
 
 private func check(_ ok: Bool, _ msg: @autoclosure () -> String) {
