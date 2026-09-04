@@ -661,6 +661,13 @@ limitation, not a UI nicety. `root()` follows merge chains with a hop limit;
   app som står og venter på en dialog. Bygg med «Schous Dev»-identiteten, og hvis
   et spørsmål likevel er ventet: si fra til brukeren og vent på svar før du
   måler, ikke gjett på en delay.
+- **Låst skjerm ser ut som en app uten vindu.** Målt 2026-09-04: med
+  `CGSSessionScreenIsLocked = Yes` (`ioreg -n Root -d1 | grep IOConsoleUsers`)
+  svarer System Events `0 windows` for både ny og gammel build, `activate`
+  gjør ikke appen `frontmost`, `screencapture` feiler med «could not create
+  image from display», og et syntetisk `key code` når ikke Carbon-hurtigtasten.
+  Menyene i menylinja *kan* leses, så en test som kun ser på dem står grønn.
+  Sjekk låsen før du bisekterer en «vinduet forsvant»-regresjon.
 - **`prosess-status: S` beviser ingenting.** En app som står og venter på en
   TCC-dialog ser ut som en app som kjører helt fint. Det gjelder `codesign` i
   `bundle.sh` også, som venter på nøkkelringen. Dialogen
