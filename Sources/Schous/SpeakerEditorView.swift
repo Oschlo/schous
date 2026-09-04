@@ -101,14 +101,17 @@ struct SpeakerEditorView: View {
         }
         .frame(minWidth: 340)
         .animation(.default, value: hasSummary)
-        .background(GeometryReader { g in
-            Color.clear.onChange(of: g.size.width, initial: true) { _, w in narrow = w < 760 }
-        })
         // Talere er egenskaper ved innholdet, ikke navigasjon — altså en
         // inspektør, med systemets egen kant, bredde og av/på-knapp.
         .inspector(isPresented: showInspector) {
             inspector.inspectorColumnWidth(min: 240, ideal: 300, max: 420)
         }
+        // Måles *utenfor* .inspector, altså hele vinduet. Innenfor ville den
+        // målt dokumentkolonnen: 900 pt vindu med 300 pt inspektør gir 600,
+        // inspektøren skjules, kolonnen blir 900, inspektøren vises — i sløyfe.
+        .background(GeometryReader { g in
+            Color.clear.onChange(of: g.size.width, initial: true) { _, w in narrow = w < 760 }
+        })
         .toolbar {
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 6) {
