@@ -145,3 +145,15 @@ Closes #30
 
 https://claude.ai/code/session_01Vs67ouws2jsrGdcbj6Qouu
 ```
+
+## Tillegg 2026-09-04 kveld (M1 Pro, 32 GB, ollama 0.33.3)
+
+Punkt 1–4 under «Neste steg» er gjort: sluttreview (funn fikset i d6895aa),
+PR opprettet mot main, kommentar på #34. Selfcheck var flaky på M1 Pro
+(RST fra nc, a2ee689). Kald prefill her: 309 s til første pakke på 7 716
+ord, under 600 s. Stand-Up-malen gjengir også sin egen instruks (#36).
+
+Ikke gjort: ekte kjøring *gjennom appen* på M1 Pro — `osascript` henger mot
+System Events på denne maskinen (også `get name of every process`), så
+UI-et må klikkes for hånd: «Åpne resultat» → «Lag referat». Det som da er
+umålt er CPU-bruken i appen under varm strømming med strupingen.
