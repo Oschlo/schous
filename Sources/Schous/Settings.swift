@@ -143,11 +143,34 @@ final class AppSettings: ObservableObject {
     @Published var checkResult: String?
     @Published var checking = false
 
+    /// Referat. Alt i UserDefaults; prompten kan justeres uten ny build.
+    @Published var ollamaURL: String { didSet { UserDefaults.standard.set(ollamaURL, forKey: "ollamaURL") } }
+    @Published var summaryModel: String { didSet { UserDefaults.standard.set(summaryModel, forKey: "summaryModel") } }
+    @Published var summaryLanguage: SummaryLanguage {
+        didSet { UserDefaults.standard.set(summaryLanguage.rawValue, forKey: "summaryLanguage") }
+    }
+    @Published var summaryPrompt: String { didSet { UserDefaults.standard.set(summaryPrompt, forKey: "summaryPrompt") } }
+    /// Modellene ollama svarte med. nil før første henting, og når den ikke svarer.
+    @Published var models: [String]?
+
+    var ollamaBaseURL: URL { URL(string: ollamaURL) ?? URL(string: "http://localhost:11434")! }
+
+    func refreshModels() async {
+        models = await Ollama.models(baseURL: ollamaBaseURL)
+        // Første gang: velg noe, så editoren ikke står med tom modell.
+        if summaryModel.isEmpty, let first = models?.first { summaryModel = first }
+    }
+
     private init() {
         backendPath = UserDefaults.standard.string(forKey: "backendPath") ?? ""
         let saved = UserDefaults.standard.stringArray(forKey: "outputFormats")
         formats = saved.map { Set($0.compactMap(OutputFormat.init(rawValue:))) }
             ?? Set(OutputFormat.allCases)
+        let d = UserDefaults.standard
+        ollamaURL = d.string(forKey: "ollamaURL") ?? "http://localhost:11434"
+        summaryModel = d.string(forKey: "summaryModel") ?? ""
+        summaryLanguage = SummaryLanguage(rawValue: d.string(forKey: "summaryLanguage") ?? "") ?? .norwegian
+        summaryPrompt = d.string(forKey: "summaryPrompt") ?? Summary.defaultPrompt
     }
 
     var backendURL: URL? { backendPath.isEmpty ? nil : URL(fileURLWithPath: backendPath) }
@@ -308,6 +331,50 @@ struct SettingsView: View {
                      + "kan skrive ett enkelt format uten å endre dette.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section("Referat") {
+                TextField("ollama-URL", text: $settings.ollamaURL)
+                    .textFieldStyle(.roundedBorder)
+                HStack {
+                    if let models = settings.models {
+                        Picker("Standardmodell", selection: $settings.summaryModel) {
+                            ForEach(models, id: \.self) { Text($0).tag($0) }
+                            // Lagret modell som ikke finnes lenger: vis den, så
+                            // valget ikke stille byttes til noe annet.
+                            if !settings.summaryModel.isEmpty, !models.contains(settings.summaryModel) {
+                                Text("\(settings.summaryModel) (ikke installert)").tag(settings.summaryModel)
+                            }
+                        }
+                    } else {
+                        Text("ollama svarer ikke på \(settings.ollamaURL)")
+                            .font(.caption).foregroundStyle(.orange)
+                    }
+                    Button("Hent modeller") { Task { await settings.refreshModels() } }
+                }
+                Picker("Standardspråk", selection: $settings.summaryLanguage) {
+                    ForEach(SummaryLanguage.allCases) { Text($0.label).tag($0) }
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Prompt").font(.caption).foregroundStyle(.secondary)
+                    TextEditor(text: $settings.summaryPrompt)
+                        .font(.caption.monospaced())
+                        .frame(height: 160)
+                    HStack {
+                        Text("{template} {language} {context} {transcript} byttes ut før sending. "
+                             + "Det som står her er nøyaktig det som sendes.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Tilbakestill") { settings.summaryPrompt = Summary.defaultPrompt }
+                            .disabled(settings.summaryPrompt == Summary.defaultPrompt)
+                    }
+                }
+                Button("Åpne malmappe") {
+                    Templates.seedIfMissing()
+                    NSWorkspace.shared.open(Templates.directory)
+                }
+                Text("Én *.md per mal. Filnavnet er malnavnet. Referatet skrives som "
+                     + "<fil>.<mal>.md i output-mappa.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Hugging Face") {
                 // Ikke et felt: tokenet eies av huggingface_hub, som leser
                 // HF_TOKEN og faller tilbake på ~/.cache/huggingface/token.
@@ -333,6 +400,7 @@ struct SettingsView: View {
                 }
             }
         }
+        .task { await settings.refreshModels() }
         // Hele skjemaet, ikke bare knappene: sjekken kjører på stien slik den
         // var da den startet, så et felt som kan endres mens den går, gir et
         // grønt svar på noe som aldri ble sjekket.
