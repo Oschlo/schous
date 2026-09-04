@@ -81,9 +81,10 @@ nøyaktig det som sendes, og en delt prompt gjør den påstanden usann.
 Sluttobjektet har `done: true` og `prompt_eval_count`, som logges. Teksten som
 vokser i vinduet *er* fremdriften. Ingen ProgressView.
 
-**`think: false` og 400.** Modeller uten thinking-kapabilitet kan svare 400 på
-feltet. Da sendes kallet én gang til uten `think`. Måles i planen mot en
-modell uten kapabiliteten før det antas.
+**`think: false` sendes alltid, også til modeller uten kapabiliteten.** Målt
+2026-09-04 på ollama 0.33.3 mot `NbAiLab/borealis-instruct-preview:4b`
+(`capabilities: [completion, vision]`): HTTP 200, normalt svar. Ingen
+retry-gren uten `think`; den ville vært kode for et problem som ikke finnes.
 
 **Frist.** `URLSessionConfiguration.timeoutIntervalForRequest = 120`. Det er
 tid *mellom* to datapakker, ikke total tid, så et to timers møte får ta tiden
