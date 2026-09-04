@@ -12,6 +12,7 @@ func runSelfcheckAndExit() -> Never {
     summarizerSelfcheck()
     summarizerNetworkSelfcheck()
     estimatesSelfcheck()
+    documentSelfcheck()
 
     let job = TranscriptionJob()
 
@@ -425,6 +426,34 @@ private func ≈ (a: [Float], b: [Float]) -> Bool {
     a.count == b.count && zip(a, b).allSatisfy { abs($0 - $1) < 1e-6 }
 }
 
+/// Dokumentet: søk (⌘F), Markdown-rendering (#41) og filnavn med tittel (#42).
+private func documentSelfcheck() {
+    let seg = Segment(start: 1, end: 2, speaker: "SPEAKER_00", language: "no", text: "Møtet begynte på tirsdag.")
+    check(matches(seg, query: ""), "tom query treffer alt")
+    check(matches(seg, query: "MØTET"), "søket er ufølsomt for store bokstaver")
+    // «å» er a + ring og normaliseres; «ø» er en egen bokstav og gjør det ikke.
+    check(matches(seg, query: "pa tirsdag"), "søket er ufølsomt for diakritika")
+    check(!matches(seg, query: "onsdag"), "ikke-treff skal ikke treffe")
+
+    // Det malene faktisk produserer. <aside> fra Notion-eksporten hoppes over,
+    // og en avsluttende tomlinje blir ikke en .blank.
+    let md = "# Tittel\n\n## Del\n- punkt\n- [ ] åpen\n- [x] gjort\n1. første\nVanlig **fet** tekst\n<aside>hopp</aside>\n"
+    let blocks = MarkdownBlock.parse(md)
+    check(blocks == [.heading(1, "Tittel"), .blank, .heading(2, "Del"), .bullet("punkt"), .task(false, "åpen"),
+                     .task(true, "gjort"), .numbered(1, "første"), .paragraph("Vanlig **fet** tekst")],
+          "markdown-blokker: \(blocks)")
+    check(MarkdownBlock.parse("").isEmpty && MarkdownBlock.parse("\n\n").isEmpty, "tomt dokument gir ingen blokker")
+
+    check(filenameSafe("Coast: intro / AI") == "Coast- intro - AI", filenameSafe("Coast: intro / AI"))
+    check(filenameSafe("  ") == "", "bare mellomrom er tomt")
+    var comps = DateComponents(year: 2026, month: 9, day: 3, hour: 12)
+    comps.timeZone = .current
+    let d = Calendar(identifier: .gregorian).date(from: comps)!
+    check(outputBase(title: "Coast intro om AI-strategi", date: d, fallback: "Opptak-x") == "2026-09-03 Coast intro om AI-strategi",
+          outputBase(title: "Coast intro om AI-strategi", date: d, fallback: "Opptak-x"))
+    check(outputBase(title: " ", date: d, fallback: "Opptak-x") == "Opptak-x", "tom tittel = kildefilas navn")
+}
+
 /// Estimatene i #39: rater fra forrige kjøring, i en egen defaults-suite så
 /// selfcheck aldri rører brukerens tall.
 private func estimatesSelfcheck() {
@@ -481,6 +510,7 @@ private func summarizerSelfcheck() {
     check(Templates.slug("Customer Call") == "customer-call", "slug: \(Templates.slug("Customer Call"))")
     check(Templates.slug("Stand-Up") == "stand-up", "slug: \(Templates.slug("Stand-Up"))")
     check(Templates.slug("Discovery interview") == "discovery-interview", "slug med små bokstaver")
+    check(Templates.slug("A/B: test") == "a-b--test", "slug med tegn som ikke kan stå i filnavn: \(Templates.slug("A/B: test"))")
 
     // Seeding: kopierer bare når mappa ikke finnes. En tom mappe er et valg.
     let root = URL.temporaryDirectory.appending(path: "schous-templates-\(getpid())")

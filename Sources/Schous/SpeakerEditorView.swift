@@ -23,6 +23,11 @@ struct SpeakerEditorView: View {
     @State private var wantsInspector = true
     @State private var narrow = false
     @State private var summarySelection = SummarySelection()
+    /// Tittelen som blir filnavnet (#42). Lagres som title.txt i jobbmappa;
+    /// tom = kildefilas navn.
+    @State private var title = ""
+    @State private var query = ""
+    @FocusState private var searchFocused: Bool
 
     @StateObject private var summarizer = Summarizer()
     enum Pane: String, CaseIterable { case transcript = "Transkripsjon", summary = "Referat" }
@@ -52,6 +57,16 @@ struct SpeakerEditorView: View {
     private var resolved: [String: String] {
         Dictionary(uniqueKeysWithValues: ids.map { ($0, label($0)) })
     }
+
+    /// Segmentene som vises: alle, eller de som treffer søket.
+    private var shown: [Segment] { job.segments.filter { matches($0, query: query) } }
+
+    /// Datoen i filnavnet er inputfilas opprettelsesdato — det er når møtet
+    /// var, ikke når det ble eksportert.
+    private var inputDate: Date {
+        (try? job.input?.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date()
+    }
+    private var exportBase: String { outputBase(title: title, date: inputDate, fallback: job.base) }
 
     private var showInspector: Binding<Bool> {
         Binding(get: { wantsInspector && !narrow }, set: { wantsInspector = $0 })
@@ -95,6 +110,20 @@ struct SpeakerEditorView: View {
             inspector.inspectorColumnWidth(min: 240, ideal: 300, max: 420)
         }
         .toolbar {
+            ToolbarItem(placement: .principal) {
+                HStack(spacing: 6) {
+                    // Egen TextField, ikke .searchable: fokus fra ⌘F kan
+                    // ikke styres programmatisk før macOS 15.
+                    TextField("Søk i transkripsjonen", text: $query)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 200)
+                        .focused($searchFocused)
+                        .accessibilityLabel("Søk i transkripsjonen")
+                    if !query.isEmpty {
+                        Text("\(shown.count) treff").font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+                    }
+                }
+            }
             ToolbarItem(placement: .navigation) {
                 // Det knappen alltid har gjort: tilbake til oppsettet, med fila
                 // fortsatt valgt. «Ny fil» var feil navn på det.
@@ -123,6 +152,15 @@ struct SpeakerEditorView: View {
                     .help(narrow ? "Vinduet er for smalt for inspektøren" : "Vis eller skjul talere og referat")
                     .disabled(narrow)
             }
+            ToolbarItem(placement: .primaryAction) {
+                if pane == .summary, hasSummary {
+                    Button("Kopier referat", systemImage: "doc.on.doc") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(summarizer.text, forType: .string)
+                    }
+                    .help("Kopierer referatet som Markdown")
+                }
+            }
             ToolbarItemGroup(placement: .primaryAction) {
                 // Delt knapp: klikk skriver standardformatene fra Innstillinger,
                 // pilen skriver ett enkelt format uten å endre standarden.
@@ -146,6 +184,10 @@ struct SpeakerEditorView: View {
         .onReceive(NotificationCenter.default.publisher(for: .toggleInspector)) { _ in
             wantsInspector.toggle()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .focusSearch)) { _ in
+            pane = .transcript
+            searchFocused = true
+        }
         .navigationTitle(job.base)
         // Når kjøringen starter er referatet det du venter på — vis det.
         .onChange(of: summarizer.state) { _, new in
@@ -156,24 +198,41 @@ struct SpeakerEditorView: View {
         .onDisappear { summarizer.cancel() }
     }
 
+    /// Transkripsjonen som et dokument: rolig maksbredde, luft mellom
+    /// replikkene, talernavn som token (farge + tekst, aldri farge alene),
+    /// tidsstempel som kan kopieres.
     private var transcript: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 8) {
-                ForEach(job.segments) { s in
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 6) {
-                            Text(String(ts(s.start, ".").dropLast(4)))
-                                .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                            Text(label(s.speaker)).font(.caption.weight(.semibold))
+            LazyVStack(alignment: .leading, spacing: 14) {
+                if shown.isEmpty, !query.isEmpty {
+                    Text("Ingen treff på «\(query)».").foregroundStyle(.secondary)
+                }
+                ForEach(shown) { s in
+                    let stamp = String(ts(s.start, ".").dropLast(4))
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 8) {
+                            Button(stamp) {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(stamp, forType: .string)
+                            }
+                            .buttonStyle(.plain)
+                            .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                            .help("Kopier tidsstempel")
+                            .accessibilityLabel("Tidsstempel \(stamp), kopier")
+                            Text(label(s.speaker))
+                                .font(.caption.weight(.semibold))
                                 .foregroundStyle(color(for: root(s.speaker)))
+                                .padding(.horizontal, 6).padding(.vertical, 1)
+                                .background(color(for: root(s.speaker)).opacity(0.12), in: Capsule())
                             Text(s.language).font(.caption).foregroundStyle(.secondary)
                         }
-                        Text(s.text).textSelection(.enabled)
+                        Text(s.text).lineSpacing(3).textSelection(.enabled)
                     }
                 }
             }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 24).padding(.vertical, 20)
+            .frame(maxWidth: 760, alignment: .leading)
+            .frame(maxWidth: .infinity)
         }
     }
 
@@ -196,7 +255,8 @@ struct SpeakerEditorView: View {
                                          count: count, label: label, root: root, color: color(for:),
                                          quote: quote)
                     case .summary:
-                        SummaryControls(jobDir: job.jobDir, summarizer: summarizer, selection: $summarySelection)
+                        SummaryControls(jobDir: job.jobDir, summarizer: summarizer, selection: $summarySelection,
+                                        title: $title, fallbackName: job.base)
                     }
                 }
                 .padding(16)
@@ -237,12 +297,12 @@ struct SpeakerEditorView: View {
             return
         }
         do {
-            written = try writeOutputs(job.segments, to: outputDir, base: job.base,
+            written = try writeOutputs(job.segments, to: outputDir, base: exportBase,
                                        names: resolved, formats: formats)
             saveMapping()
             failed = false
             let list = written.map { $0.pathExtension.uppercased() }.joined(separator: ", ")
-            status = "Lagret \(list) i \(outputDir.lastPathComponent)"
+            status = "Lagret \(list) som «\(exportBase)» i \(outputDir.lastPathComponent)"
         } catch {
             failed = true
             // Skrivingene er separate: feiler den andre, ligger den første igjen på disk
@@ -269,7 +329,7 @@ struct SpeakerEditorView: View {
                                     transcript: transcriptText(job.segments, names: resolved),
                                     using: settings.summaryPrompt)
         let slug = Templates.slug(Templates.name(template))
-        var targets = [outputDir.appending(path: "\(job.base).\(slug).md")]
+        var targets = [outputDir.appending(path: "\(exportBase).\(slug).md")]
         if let dir = job.jobDir {
             targets.append(dir.appending(path: "summary.\(slug).md"))
             try? sel.context.write(to: dir.appending(path: "context.txt"), atomically: true, encoding: .utf8)
@@ -280,9 +340,10 @@ struct SpeakerEditorView: View {
     private var mappingURL: URL? { job.jobDir?.appending(path: "speakers.json") }
 
     private func saveMapping() {
-        guard let url = mappingURL else { return }
+        guard let url = mappingURL, let dir = job.jobDir else { return }
         let payload = ["names": names, "mergedInto": mergedInto]
         try? JSONEncoder().encode(payload).write(to: url)
+        try? title.write(to: dir.appending(path: "title.txt"), atomically: true, encoding: .utf8)
     }
 
     private func loadMapping() {
@@ -290,6 +351,10 @@ struct SpeakerEditorView: View {
            let payload = try? JSONDecoder().decode([String: [String: String]].self, from: data) {
             names = payload["names"] ?? [:]
             mergedInto = payload["mergedInto"] ?? [:]
+        }
+        if let dir = job.jobDir,
+           let saved = try? String(contentsOf: dir.appending(path: "title.txt"), encoding: .utf8) {
+            title = saved
         }
 
         // Et tidligere referat fra denne jobben vises igjen. Nyeste hvis flere.

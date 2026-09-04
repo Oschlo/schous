@@ -89,9 +89,10 @@ enum Templates {
 
     static func name(_ url: URL) -> String { url.deletingPathExtension().lastPathComponent }
 
-    /// «Customer Call» → «customer-call». Brukes i filnavnet på referatet.
+    /// «Customer Call» → «customer-call». Brukes i filnavnet på referatet,
+    /// så «/» og «:» må ut først (#42).
     static func slug(_ name: String) -> String {
-        name.lowercased().replacingOccurrences(of: " ", with: "-")
+        filenameSafe(name).lowercased().replacingOccurrences(of: " ", with: "-")
     }
 }
 

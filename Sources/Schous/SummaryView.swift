@@ -18,6 +18,8 @@ struct SummaryControls: View {
     let jobDir: URL?
     @ObservedObject var summarizer: Summarizer
     @Binding var selection: SummarySelection
+    @Binding var title: String
+    let fallbackName: String
     @ObservedObject private var settings = AppSettings.shared
 
     @State private var templates: [URL] = []
@@ -26,6 +28,17 @@ struct SummaryControls: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                TextField("Tittel", text: $title)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel("Tittel")
+                    .accessibilityHint("Blir filnavnet på transkripsjon og referat, med dato først.")
+                Text(title.trimmingCharacters(in: .whitespaces).isEmpty
+                     ? "Blir filnavnet, med dato først. Tomt = «\(fallbackName)»."
+                     : "Filene får navnet «\(outputBase(title: title, date: Date(), fallback: fallbackName))».")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if templates.isEmpty {
                 Text("Ingen maler i malmappa.").foregroundStyle(.orange).font(.callout)
                 Button("Åpne malmappe") { Templates.open() }
@@ -170,17 +183,24 @@ struct SummaryFooter: View {
 }
 
 /// Teksten mens den strømmer inn, og etterpå. Full høyde i dokumentkolonnen;
-/// fanen over velger mellom denne og transkripsjonen.
+/// fanen over velger mellom denne og transkripsjonen. Rått mens det strømmer
+/// — teksten vokser ti ganger i sekundet, og renderingen skal ikke gjøre
+/// CPU-toppen mot slutten verre — og rendret Markdown når den er ferdig (#41).
 struct SummaryPanel: View {
     @ObservedObject var summarizer: Summarizer
 
     var body: some View {
         ScrollView {
-            Text(summarizer.text)
-                .textSelection(.enabled)
-                .frame(maxWidth: 760, alignment: .leading)
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 24).padding(.vertical, 20)
+            Group {
+                if summarizer.state == .running {
+                    Text(summarizer.text).textSelection(.enabled)
+                } else {
+                    MarkdownView(text: summarizer.text)
+                }
+            }
+            .frame(maxWidth: 760, alignment: .leading)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 24).padding(.vertical, 20)
         }
     }
 }
