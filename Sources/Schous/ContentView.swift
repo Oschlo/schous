@@ -33,7 +33,7 @@ struct ContentView: View {
                     WorkflowStepper(current: .file)
                         .padding(.horizontal, 24).padding(.top, 16)
                     JobSetupView(job: job, input: input, duration: duration, dropping: dropping,
-                                 speakers: $speakers, pickInput: pickInput, pickOutput: pickOutput,
+                                 speakers: $speakers, pickInput: pickInput, pickOutput: settings.pickOutputFolder,
                                  start: start, openResult: { job.loadFinished(input: input) })
                 } else {
                     EmptyStateView(dropping: dropping, pickFile: pickInput)
@@ -135,16 +135,4 @@ struct ContentView: View {
         if job.state == .done { leaveEditor() }
     }
 
-    private func pickOutput() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.prompt = "Velg"
-        if panel.runModal() == .OK, let url = panel.url {
-            // ⌘⇧G kan returnere en fil selv med canChooseFiles = false — bruk mappen den ligger i.
-            var isDir: ObjCBool = false
-            let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
-            settings.outputPath = ((exists && isDir.boolValue) ? url : url.deletingLastPathComponent()).path
-        }
-    }
 }

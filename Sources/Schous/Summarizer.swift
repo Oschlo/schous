@@ -179,7 +179,9 @@ final class Summarizer: ObservableObject {
                                                              in: estimateStore))
         task = Task { [weak self] in
             guard let self else { return }
-            defer { self.phase = .idle }
+            // Ikke etter cancel(): run() har alt satt fasen for neste kjøring,
+            // og den gamle Task-ens avslutning skal ikke viske den ut.
+            defer { if !Task.isCancelled { self.phase = .idle } }
             do {
                 try await self.stream(prompt: prompt, model: model, baseURL: baseURL)
                 guard !Task.isCancelled else { return }

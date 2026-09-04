@@ -44,7 +44,7 @@ private struct GeneralPane: View {
                         Text(URL(fileURLWithPath: settings.outputPath).lastPathComponent)
                             .lineLimit(1).truncationMode(.head)
                             .help(settings.outputPath)
-                        Button("Velg…", action: pickOutput)
+                        Button("Velg…") { settings.pickOutputFolder() }
                     }
                 }
                 Text("Transkripsjon, referat og menylinje-opptak havner her.")
@@ -66,17 +66,6 @@ private struct GeneralPane: View {
         .formStyle(.grouped)
     }
 
-    private func pickOutput() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.prompt = "Velg"
-        if panel.runModal() == .OK, let url = panel.url {
-            var isDir: ObjCBool = false
-            let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
-            settings.outputPath = ((exists && isDir.boolValue) ? url : url.deletingLastPathComponent()).path
-        }
-    }
 }
 
 private struct TranscriptionPane: View {

@@ -648,6 +648,9 @@ om vinduet. Det som ser vilkårlig ut i koden, og ikke er det:
   sier «ca.» og «vanligvis». Lydlengden kommer fra `AVURLAsset` i
   `ContentView` og følger `start(input:speakers:audioSeconds:)`; er den 0
   lagres ingen rate. Steg 4 bruker fortsatt segmenttellingen (`eta`).
+  **Fantes `work/` da jobben startet, lagres og vises ingen rate for steg
+  1–3** (`cachedSteps`): de flyr forbi på cache, og en rate på null sekunder
+  ville gitt «under ett minutt» for diarization på neste ferske fil.
   Referatets rate kommer fra `load_duration` og `prompt_eval_duration` i
   ollamas sluttobjekt; `Summarizer.estimateStore` er injiserbar så
   `--selfcheck` ikke rører brukerens tall.

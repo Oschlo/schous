@@ -162,6 +162,20 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(outputPath, forKey: "outputPath") }
     }
 
+    /// Mappevelgeren for målmappa, delt mellom oppsettet og Innstillinger.
+    /// ⌘⇧G kan returnere en fil selv med canChooseFiles = false — da brukes
+    /// mappen den ligger i.
+    func pickOutputFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.prompt = "Velg"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        var isDir: ObjCBool = false
+        let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
+        outputPath = ((exists && isDir.boolValue) ? url : url.deletingLastPathComponent()).path
+    }
+
     /// Vektene ligger under ~/.cache/huggingface, og bare der: `subprocessEnv`
     /// fjerner HF_HOME. Tomtilstanden sier «klare» eller «lastes ned ved første
     /// kjøring» — README kaller nedlastingen første jobbs mest sannsynlige

@@ -39,11 +39,15 @@ final class TranscriptionJob: ObservableObject {
     /// lagres ingen rate og vises ingen anslag.
     private(set) var audioSeconds: Double = 0
     @Published private(set) var stepStarted: Date?
+    /// work/ fantes da jobben startet: steg 1–3 flyr forbi på cache, og en
+    /// rate på null sekunder ville gitt «under ett minutt» for diarization
+    /// neste gang. Da verken lagres eller vises anslag for dem.
+    private(set) var cachedSteps = false
 
     /// Gjenstående i gjeldende steg fra forrige kjørings rate, eller nil.
     /// Steg 4 har et ekte anslag (`eta`) fra segmenttellingen og bruker ikke dette.
     var stepEstimate: TimeInterval? {
-        guard let t0 = stepStarted,
+        guard !(cachedSteps && step < 4), let t0 = stepStarted,
               let total = Estimates.stepEstimate(step, audioSeconds: audioSeconds) else { return nil }
         return max(0, total - Date().timeIntervalSince(t0))
     }
@@ -72,6 +76,7 @@ final class TranscriptionJob: ObservableObject {
         self.audioSeconds = audioSeconds
         let dir = Self.jobDirectory(for: input)
         jobDir = dir
+        cachedSteps = FileManager.default.fileExists(atPath: dir.appending(path: "work").path)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 
         segments = []
@@ -342,7 +347,9 @@ final class TranscriptionJob: ObservableObject {
     /// også; raten blir for lav, og retter seg ved neste hele kjøring.
     private func closeStep() {
         guard let t0 = stepStarted, (1...4).contains(step) else { return }
-        Estimates.recordStep(step, seconds: Date().timeIntervalSince(t0), audioSeconds: audioSeconds)
+        if !(cachedSteps && step < 4) {
+            Estimates.recordStep(step, seconds: Date().timeIntervalSince(t0), audioSeconds: audioSeconds)
+        }
         stepStarted = nil
     }
 

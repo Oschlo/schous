@@ -8,6 +8,9 @@ struct SummarySelection {
     var model = ""
     var language: SummaryLanguage = .norwegian
     var context = ""
+    /// Satt når kontekst og språk er lest første gang. Fanen bygges på nytt
+    /// hver gang den vises, og `.task` må ikke overskrive det som er skrevet.
+    var loaded = false
 }
 
 /// Valgene før et referat: mal, modell, språk, kontekst. Kontekst lagres i
@@ -20,6 +23,8 @@ struct SummaryControls: View {
     @Binding var selection: SummarySelection
     @Binding var title: String
     let fallbackName: String
+    /// Datoen filnavnet får — inputfilas, ikke dagens.
+    let date: Date
     @ObservedObject private var settings = AppSettings.shared
 
     @State private var templates: [URL] = []
@@ -35,7 +40,7 @@ struct SummaryControls: View {
                     .accessibilityHint("Blir filnavnet på transkripsjon og referat, med dato først.")
                 Text(title.trimmingCharacters(in: .whitespaces).isEmpty
                      ? "Blir filnavnet, med dato først. Tomt = «\(fallbackName)»."
-                     : "Filene får navnet «\(outputBase(title: title, date: Date(), fallback: fallbackName))».")
+                     : "Filene får navnet «\(outputBase(title: title, date: date, fallback: fallbackName))».")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -77,15 +82,18 @@ struct SummaryControls: View {
         .task {
             Templates.seedIfMissing()
             rescanTemplates()
-            selection.language = settings.summaryLanguage
-            // Alt som kan skrives i må stå klart *før* ventingen på ollama:
-            // den kan ta 5 s, og feltet er ikke sperret imens.
-            if let dir = jobDir,
-               let saved = try? String(contentsOf: dir.appending(path: "context.txt"), encoding: .utf8) {
-                selection.context = saved
+            if !selection.loaded {
+                selection.loaded = true
+                selection.language = settings.summaryLanguage
+                // Alt som kan skrives i må stå klart *før* ventingen på ollama:
+                // den kan ta 5 s, og feltet er ikke sperret imens.
+                if let dir = jobDir,
+                   let saved = try? String(contentsOf: dir.appending(path: "context.txt"), encoding: .utf8) {
+                    selection.context = saved
+                }
             }
             if settings.models == nil { await settings.refreshModels() }
-            pickModel(settings.summaryModel)
+            pickModel(selection.model.isEmpty ? settings.summaryModel : selection.model)
         }
         // Lista byttes ut fra Innstillinger (ny URL, «Hent modeller»); et valg
         // som ikke finnes der lenger ville sendt et 404.

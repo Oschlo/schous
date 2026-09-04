@@ -256,7 +256,7 @@ struct SpeakerEditorView: View {
                                          quote: quote)
                     case .summary:
                         SummaryControls(jobDir: job.jobDir, summarizer: summarizer, selection: $summarySelection,
-                                        title: $title, fallbackName: job.base)
+                                        title: $title, fallbackName: job.base, date: inputDate)
                     }
                 }
                 .padding(16)
