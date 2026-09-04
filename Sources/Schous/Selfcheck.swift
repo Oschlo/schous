@@ -1,4 +1,5 @@
 import AVFoundation
+import Combine
 import Foundation
 
 /// `Schous --selfcheck` — verifiserer at parserne matcher ekte backend-output.
@@ -524,7 +525,40 @@ private func summarizerNetworkSelfcheck() {
     // kjøre neste gang MainActor-køen tømmes.
     check(s6.state == .idle, "kansellert: \(s6.state)")
     check(!FileManager.default.fileExists(atPath: outCancel.path), "kansellert skrev likevel fil")
+    // …og etter at den kansellerte Task-en har fått avvikle: fortsatt .idle,
+    // fortsatt ingen fil, og defer-flushen i stream() la ikke rest i `text`.
+    RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+    check(s6.state == .idle, "kansellert, etter avvikling: \(s6.state)")
+    check(!FileManager.default.fileExists(atPath: outCancel.path), "kansellert skrev fil etter avvikling")
     server6.terminate()
+
+    // 7. Strøm som slutter uten done: nc lukker pent etter én bit. Det er slik
+    //    en runner som dør ser ut utenfra, og det må ikke bli «Referat lagret».
+    try? FileManager.default.removeItem(at: out)
+    s = summarize(port: 11507, response: http(200, [content]), out: out)
+    check({ if case .failed(let m) = s.state { return m.contains("brutt") }; return false }(),
+          "EOF uten done: \(s.state)")
+    check(!FileManager.default.fileExists(atPath: out.path), "EOF uten done skrev fil")
+
+    // 8. Feilen som egen NDJSON-linje midt i en 200-strøm — det ollama gjør
+    //    når runneren dør etter at statuslinja er sendt.
+    s = summarize(port: 11508, response: http(200, [content, #"{"error":"runner process has terminated"}"#]), out: out)
+    check({ if case .failed(let m) = s.state { return m.contains("runner process") }; return false }(),
+          "feil i strøm: \(s.state)")
+    check(!FileManager.default.fileExists(atPath: out.path), "feil i strøm skrev fil")
+
+    // 9. Strupet publisering: 200 linjer i én pakke skal gi en håndfull
+    //    oppdateringer av `text`, ikke 200. Målt 2026-09-04 før strupingen:
+    //    appen brukte ~7 min på 100 % CPU etter at ollama var ferdig, ett
+    //    re-render av hele editoren per linje.
+    var publishes = 0
+    let s9 = Summarizer(timeout: 10)
+    let sub = s9.$text.dropFirst().sink { _ in publishes += 1 }
+    s = summarize(port: 11509, response: http(200, Array(repeating: content, count: 200) + [done]),
+                  out: out, summarizer: s9)
+    check(s.text == String(repeating: "hei", count: 200), "200 linjer: \(s.text.count) tegn")
+    check(publishes < 10, "struping: \(publishes) publiseringer for 200 linjer")
+    sub.cancel()
 }
 
 /// Rå HTTP-respons for nc. NDJSON-linjer, `\n`-terminert som ollama gjør.
@@ -572,9 +606,10 @@ private func startServer(port: Int, response: String, hold: Int, reqFile: URL?) 
 /// Summarizer mot den og pumper RunLoop til den konkluderer.
 @MainActor
 private func summarize(port: Int, response: String?, hold: Int = 0, out: URL,
-                       timeout: TimeInterval = 10, reqFile: URL? = nil) -> Summarizer {
+                       timeout: TimeInterval = 10, reqFile: URL? = nil,
+                       summarizer: Summarizer? = nil) -> Summarizer {
     let server = response.map { startServer(port: port, response: $0, hold: hold, reqFile: reqFile) }
-    let s = Summarizer(timeout: timeout)
+    let s = summarizer ?? Summarizer(timeout: timeout)
     s.run(prompt: "p", model: "m", baseURL: URL(string: "http://127.0.0.1:\(port)")!, writeTo: [out])
     let deadline = Date().addingTimeInterval(timeout + 8)
     while s.state == .running || s.state == .idle, Date() < deadline {

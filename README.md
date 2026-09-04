@@ -204,10 +204,10 @@ that wraps the template is editable in Settings.
 Requires [ollama](https://ollama.com) running locally with at least one model
 pulled. Settings lists the models it finds. A transcript of an hour-long
 meeting is a single call — no chunking. Measured on an 8.8k-word transcript
-(~18k tokens) with `qwen3.8:27b-mlx` on an M5: about 6 minutes the first time,
-because the model has to load and read the whole prompt before the first word
-appears — nothing is shown during that. The summary then streams into the
-window as it is produced.
+(~18k tokens) with `qwen3.8:27b-mlx` on an M5: on a cold model about two
+minutes pass before the first word, because the model has to load and read the
+whole prompt — nothing is shown during that. The summary then streams into the
+window for about six minutes.
 
 To summarise a file you transcribed earlier, pick it again and click
 **Åpne resultat**: the transcript loads without re-running the backend.

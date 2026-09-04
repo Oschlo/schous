@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 enum SummaryLanguage: String, CaseIterable, Identifiable {
@@ -64,11 +65,20 @@ enum Templates {
     static func seedIfMissing(into dir: URL = directory, from seeds: URL? = bundled) {
         let fm = FileManager.default
         guard !fm.fileExists(atPath: dir.path) else { return }
-        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        // Uten bundle (swift build) finnes ingen seeds; da må mappa *ikke*
+        // lages, ellers har debug-binæren skrudd av seedingen for bundlen.
         guard let seeds else { return }
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         for url in list(in: seeds) {
             try? fm.copyItem(at: url, to: dir.appending(path: url.lastPathComponent))
         }
+    }
+
+    /// Seeder hvis mappa mangler, lager den hvis det ikke fantes seeds, åpner.
+    static func open() {
+        seedIfMissing()
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(directory)
     }
 
     static func list(in dir: URL = directory) -> [URL] {
@@ -99,6 +109,9 @@ final class Summarizer: ObservableObject {
         let content: String
         let done: Bool
         let promptEvalCount: Int?
+        /// ollama sender feilen som egen NDJSON-linje midt i en 200-strøm når
+        /// runneren dør. Leses her, ikke bare i 404-grenen.
+        let error: String?
     }
     private struct Line: Decodable {
         struct Message: Decodable { var content: String? }
@@ -112,7 +125,7 @@ final class Summarizer: ObservableObject {
         guard let data = line.data(using: .utf8),
               let l = try? JSONDecoder().decode(Line.self, from: data) else { return nil }
         return Chunk(content: l.message?.content ?? "", done: l.done ?? false,
-                     promptEvalCount: l.prompt_eval_count)
+                     promptEvalCount: l.prompt_eval_count, error: l.error)
     }
 
     private let session: URLSession
@@ -134,6 +147,8 @@ final class Summarizer: ObservableObject {
         cfg.timeoutIntervalForResource = .infinity
         session = URLSession(configuration: cfg)
     }
+
+    deinit { session.finishTasksAndInvalidate() }
 
     func run(prompt: String, model: String, baseURL: URL, writeTo: [URL]) {
         cancel()
@@ -209,9 +224,12 @@ final class Summarizer: ObservableObject {
         // og flushes til `text` maks ti ganger i sekundet.
         var pending = ""
         var lastFlush = Date.distantPast
-        defer { if !pending.isEmpty { text += pending } }
+        // Etter cancel() har run() alt nullstilt `text` for neste kjøring;
+        // den gamle Task-ens rest skal ikke inn foran den nye.
+        defer { if !pending.isEmpty, !Task.isCancelled { text += pending } }
         for try await line in bytes.lines {
             guard let chunk = Self.parse(line) else { continue }
+            if let err = chunk.error { throw StreamError(reason: "ollama avbrøt: \(err)") }
             pending += chunk.content
             let now = Date()
             if chunk.done || now.timeIntervalSince(lastFlush) >= 0.1 {
@@ -224,6 +242,14 @@ final class Summarizer: ObservableObject {
                 return
             }
         }
+        // EOF uten done: runneren døde eller forbindelsen falt. Var det ikke
+        // en feil, ville et halvt referat blitt lagret som «Referat lagret».
+        throw StreamError(reason: "strømmen ble brutt før modellen var ferdig")
+    }
+
+    private struct StreamError: Error, LocalizedError {
+        let reason: String
+        var errorDescription: String? { "Referatet er ufullstendig — \(reason). Ingen fil er skrevet." }
     }
 
     private func write(to urls: [URL]) throws {

@@ -367,10 +367,7 @@ struct SettingsView: View {
                             .disabled(settings.summaryPrompt == Summary.defaultPrompt)
                     }
                 }
-                Button("Åpne malmappe") {
-                    Templates.seedIfMissing()
-                    NSWorkspace.shared.open(Templates.directory)
-                }
+                Button("Åpne malmappe") { Templates.open() }
                 Text("Én *.md per mal. Filnavnet er malnavnet. Referatet skrives som "
                      + "<fil>.<mal>.md i output-mappa.")
                     .font(.caption).foregroundStyle(.secondary)

@@ -24,7 +24,7 @@ struct SummaryControls: View {
             Group {
                 if templates.isEmpty {
                     Text("Ingen maler i malmappa.").foregroundStyle(.orange).font(.callout)
-                    Button("Åpne malmappe") { NSWorkspace.shared.open(Templates.directory) }
+                    Button("Åpne malmappe") { Templates.open() }
                 } else {
                     Picker("Mal", selection: $template) {
                         ForEach(templates, id: \.self) { Text(Templates.name($0)).tag(Optional($0)) }
@@ -58,7 +58,7 @@ struct SummaryControls: View {
                     onStart(template, model, language, context)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(template == nil || model.isEmpty)
+                .disabled(template == nil || model.isEmpty || settings.models == nil)
             }
             status
         }

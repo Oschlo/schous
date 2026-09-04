@@ -92,6 +92,10 @@ det tar, mens en modell i tenkesløyfe stoppes etter 120 s stillhet. Samme
 argument som «Sjekkene i Innstillinger har en frist»: en frist som aldri er
 sett utløse, er en frist man tror på. Selfcheck skal se den utløse.
 
+*(Fristen ble 600 s i beb7a83: kald prefill på `qwen3.8:27b-mlx` med 18k tokens
+målt til 117 s uten en pakke, så 120 s slo til før første token. Tabellen under
+står som den var; CLAUDE.md er gjeldende.)*
+
 **Feil som skal kunne skilles fra hverandre**, fordi #30 målte at de ellers
 ser like ut:
 

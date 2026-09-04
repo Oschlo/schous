@@ -341,8 +341,13 @@ Fire ting som er målt og som koden hviler på:
 - **Tomt svar er sin egen feil.** `done: true` uten et eneste `content` gir
   «Modellen svarte tomt», aldri «ollama nede». Det var feilslutningen målingen
   i #30 selv gjorde først.
+- **Strøm uten `done` er en feil, ikke et ferdig referat.** ollama har alt
+  sendt 200 når runneren dør; det som kommer er én NDJSON-linje `{"error":…}`
+  og så EOF, eller bare EOF. Begge gir `.failed` og ingen fil — ellers ble et
+  halvt referat lagret som «Referat lagret». `--selfcheck` kjører begge mot
+  `nc -l`. Delteksten blir stående i fanen, som etter «Stopp».
 - **Hele transkripsjonen går i ett kall.** Målt 2026-09-04 på det lengste møtet
-  her (10 015 ord): `prompt_eval_count=18279` mot en `context_length` på 32 768,
+  her (~8,8k ord, jf. #36): `prompt_eval_count=18279` mot en `context_length` på 32 768,
   altså ingen klipping og ingen grunn til `num_ctx`. To ting kostet tid likevel,
   begge utenfor prompten: kald prompt-evaluering på `qwen3.8:27b-mlx` brukte
   117 s uten å sende ett eneste token, så den daværende 120 s-fristen løste ut
@@ -352,8 +357,10 @@ Fire ting som er målt og som koden hviler på:
   kald 27B-modell. Med varm prefiks-cache tok kjøringen 13 min 38 s fra «Lag
   referat» til «Referat lagret», hvorav ollama var ferdig etter ~6 min og resten
   var appen på 100 % CPU i SwiftUI-layout, fordi hele `SpeakerEditorView`
-  tegnes på nytt per token. Strupet publisering av `summarizer.text` fikser
-  dette — `text` oppdateres nå maks ti ganger i sekundet.
+  tegnes på nytt per token. `summarizer.text` publiseres derfor strupet, maks
+  ti ganger i sekundet; `--selfcheck` sender 200 linjer i én pakke og krever
+  under ti publiseringer. Effekten på den varme 27B-kjøringen er ikke målt på
+  nytt — tallet over er *før*.
 
 `thinking`-feltet i strømmen leses ikke. Slipper det inn, står modellens
 grubling i referatet.
