@@ -315,6 +315,60 @@ lukker. transcribe.py venter på ffmpeg før den avslutter, så det skal ikke ku
 skje — men å bytte en tapt feilmelding mot en evig spinner ville ikke vært noen
 forbedring.
 
+## Referat går rett til ollama, ikke via pi eller backend
+
+`Summarizer.swift` gjør `POST /api/chat` med `stream: true` og `think: false`,
+og leser NDJSON med `URLSession.bytes`. Ikke pi (Node fra nvm, utenfor Finders
+PATH, og en konfigurasjon appen ikke eier) og ikke `--summarize` i
+transcribe.py (backend#15: navnene finnes bare her). Design:
+`docs/superpowers/specs/2026-09-04-referat-design.md`.
+
+Fire ting som er målt og som koden hviler på:
+
+- **`think: false` alltid.** Med tenking på gikk hele budsjettet til tenking og
+  svaret kom tomt (#30). Målt 2026-09-04 på ollama 0.33.3: en modell *uten*
+  thinking-kapabilitet svarer 200 på feltet, så det finnes ingen retry-gren.
+- **Fristen er stillhet, ikke total tid.** `timeoutIntervalForRequest` er tid
+  mellom to datapakker. Et langt møte får ta tiden det tar; en modell i
+  tenkesløyfe (gemma4:12b, > 900 s i #32) stoppes etter 120 s uten token.
+  `--selfcheck` kjører den mot `nc -l` som sender én bit og tier, med fristen
+  på 1 s, og krever både meldingen *og* at det tok under 4 s. Målt i Task 3
+  utløste den på en halvåpen respons — `nc` sendte én bit, holdt socketen åpen
+  med en padda `Content-Length` og tidde — og konkluderte etter 1,078 s, så
+  ingen reservegren trengtes; klarsignalet foran er `lsof -sTCP:LISTEN` og ikke
+  `nc -z`, for `nc -z` fullfører et håndtrykk og spiser dermed den ene
+  forbindelsen en naken `nc -l` tar imot.
+- **Tomt svar er sin egen feil.** `done: true` uten et eneste `content` gir
+  «Modellen svarte tomt», aldri «ollama nede». Det var feilslutningen målingen
+  i #30 selv gjorde først.
+- **Hele transkripsjonen går i ett kall.** Målt 2026-09-04 på det lengste møtet
+  her (10 015 ord): `prompt_eval_count=18279` mot en `context_length` på 32 768,
+  altså ingen klipping og ingen grunn til `num_ctx`. To ting kostet tid likevel,
+  begge utenfor prompten: kald prompt-evaluering på `qwen3.8:27b-mlx` brukte
+  117 s uten å sende ett eneste token, så 120 s-fristen over løste ut 8 s før
+  første token — ollama-loggen viser prompten ferdig 14:56:09, appen ga opp
+  14:56:01 — og med varm prefiks-cache tok kjøringen 13 min 38 s fra «Lag
+  referat» til «Referat lagret», hvorav ollama var ferdig etter ~6 min og resten
+  var appen på 100 % CPU i SwiftUI-layout, fordi hele `SpeakerEditorView`
+  tegnes på nytt per token. Strupet publisering av `summarizer.text` er fiksen;
+  den er ikke gjort her.
+
+`thinking`-feltet i strømmen leses ikke. Slipper det inn, står modellens
+grubling i referatet.
+
+Prompten er én tekst i Innstillinger med `{template}`, `{language}`,
+`{context}` og `{transcript}` byttet ut — det som står der er nøyaktig det som
+sendes, ingen skjult system-prompt. `{transcript}` er `transcriptText`, samme
+funksjon som TXT-eksporten, så byte-diffen i `--selfcheck` vokter begge.
+
+Maler er `*.md` i `~/Library/Application Support/Schous/templates/`, seedet fra
+`Resources/templates/` **bare når mappa ikke finnes**. En tom mappe er et valg.
+`bundle.sh` må kopiere `Resources/templates`; `swift build` alene har ingen
+bundle og oppretter mappa tom.
+
+Referatet er ikke et fjerde `OutputFormat`. `writeOutputs` er en byte-eksakt
+port og skal ikke lære noe backend ikke skriver.
+
 ## Signals
 
 - **Pause is `SIGSTOP`, resume is `SIGCONT`.** Cheap and instant, but it holds

@@ -187,6 +187,28 @@ Writes `<name>.txt`, `<name>.srt` and `<name>.json` to the folder you chose —
 or whichever of those you ticked under **Eksportformater** in Settings. The
 arrow beside **Lagre** writes a single format without changing that default.
 
+## Meeting summary
+
+Once the speakers are named, pick a template, a model and a language in the
+**Referat** section under the speaker list; optionally add context (who was
+in the room, what the meeting was about). **Lag referat** saves the
+transcript first, then streams the summary into the window and writes it
+next to the transcript as `<file>.<template>.md`.
+
+Templates are Markdown files in
+`~/Library/Application Support/Schous/templates/` — one file per template, the
+file name is the template name. Three are installed on first use (Customer
+Call, Discovery interview, Stand-Up); edit them or add your own. The prompt
+that wraps the template is editable in Settings.
+
+Requires [ollama](https://ollama.com) running locally with at least one model
+pulled. Settings lists the models it finds. A transcript of an hour-long
+meeting is a single call — no chunking — and takes about a minute on an M-series
+Mac with a 27B model.
+
+To summarise a file you transcribed earlier, pick it again and click
+**Åpne resultat**: the transcript loads without re-running the backend.
+
 ## Recording from the menu bar
 
 The microphone icon in the menu bar records **system audio and the microphone at
