@@ -137,9 +137,22 @@ struct SummaryFooter: View {
     @ViewBuilder private var status: some View {
         switch summarizer.state {
         case .running:
-            if let t0 = summarizer.started {
-                (Text("Referat … ") + Text(t0, style: .timer))
+            // Fasen, ikke bare en klokke: fem minutter med en teller er ikke
+            // til å skille fra en app som henger (#39).
+            switch summarizer.phase {
+            case .waiting(let estimate):
+                ProgressView().progressViewStyle(.linear)
+                    .accessibilityLabel("Modellen leser transkripsjonen")
+                Text("Modellen leser transkripsjonen (\(summarizer.promptWords) ord)"
+                     + (estimate.map { " · tar vanligvis \(Estimates.describe($0)) på denne maskinen" }
+                        ?? " · ingenting vises før den er ferdig"))
                     .font(.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            default:
+                if let t0 = summarizer.started {
+                    (Text("Skriver referat … ") + Text(t0, style: .timer))
+                        .font(.callout).foregroundStyle(.secondary)
+                }
             }
         case .done(let url):
             Text("Referat lagret som \(url.lastPathComponent)")

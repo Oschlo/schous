@@ -501,6 +501,10 @@ private func summarizerNetworkSelfcheck() {
     check(c?.content == "hei" && c?.done == false, "content-bit: \(String(describing: c))")
     let d = Summarizer.parse(done)
     check(d?.done == true && d?.promptEvalCount == 16, "sluttobjekt: \(String(describing: d))")
+    // Varighetene i sluttobjektet er nanosekunder; det er dem anslaget bygger på (#39).
+    check(d?.loadSeconds.map { abs($0 - 6.040992125) < 1e-9 } == true
+          && d?.promptEvalSeconds.map { abs($0 - 0.68357225) < 1e-9 } == true,
+          "varigheter fra sluttobjektet: \(String(describing: d))")
     check(Summarizer.parse("ikke json") == nil, "støy skal gi nil, ikke krasj")
 
     // Klienten mot en ekte prosess. Én forbindelse per nc; hvert tilfelle får
@@ -513,9 +517,19 @@ private func summarizerNetworkSelfcheck() {
     //    på det som gikk over ledningen, ikke bare det klienten mente å sende.
     let reqFile = URL.temporaryDirectory.appending(path: "schous-req-\(getpid()).txt")
     defer { try? FileManager.default.removeItem(at: reqFile) }
-    var s = summarize(port: 11501, response: http(200, [thinking, content, done]), out: out, reqFile: reqFile)
+    let suite = "co.oschlo.schous.selfcheck-summary-\(getpid())"
+    let store = UserDefaults(suiteName: suite)!
+    defer { store.removePersistentDomain(forName: suite) }
+    let s1 = Summarizer(timeout: 10)
+    s1.estimateStore = store
+    var s = summarize(port: 11501, response: http(200, [thinking, content, done]), out: out, reqFile: reqFile,
+                      summarizer: s1)
     check(s.text == "hei", "strøm: \(s.text.debugDescription) state=\(s.state)")
     check(s.state == .done(out), "strøm-state: \(s.state)")
+    check(s.phase == .idle, "fase etter ferdig: \(s.phase)")
+    // Neste kjøring mot samme modell har et anslag: 6,04 s lasting + 0,68 s på promptens ene tegn.
+    check(Estimates.summaryEstimate(model: "m", promptChars: 1, in: store).map { abs($0 - 6.724564375) < 1e-6 } == true,
+          "raten ble ikke lagret: \(String(describing: Estimates.summaryEstimate(model: "m", promptChars: 1, in: store)))")
     check((try? String(contentsOf: out, encoding: .utf8)) == "hei", "fila ble ikke skrevet")
     check((try? String(contentsOf: reqFile, encoding: .utf8))?.contains(#""think":false"#) == true,
           "think:false gikk ikke over ledningen")
@@ -554,9 +568,16 @@ private func summarizerNetworkSelfcheck() {
     defer { try? FileManager.default.removeItem(at: outCancel) }
     let server6 = startServer(port: 11506, response: http(200, [content]), hold: 10, reqFile: nil)
     let s6 = Summarizer(timeout: 10)
-    s6.run(prompt: "p", model: "m", baseURL: URL(string: "http://127.0.0.1:11506")!, writeTo: [outCancel])
-    RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+    s6.estimateStore = store
+    s6.run(prompt: "p q r", model: "m", baseURL: URL(string: "http://127.0.0.1:11506")!, writeTo: [outCancel])
+    // Før noe er kommet: venter, med anslaget fra kjøring 1, og ordtallet fra prompten.
+    check({ if case .waiting(let e) = s6.phase { return e != nil }; return false }(), "fase før første pakke: \(s6.phase)")
+    check(s6.promptWords == 3, "ordtall: \(s6.promptWords)")
+    RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+    // Én content-bit er kommet: strømmer.
+    check(s6.phase == .streaming, "fase etter første pakke: \(s6.phase)")
     s6.cancel()
+    check(s6.phase == .idle, "fase etter avbrudd: \(s6.phase)")
     // Sjekkes uten å pumpe RunLoop igjen: cancel() skal sette .idle synkront,
     // ikke overlate det til den kansellerte Task-ens catch-gren, som først får
     // kjøre neste gang MainActor-køen tømmes.

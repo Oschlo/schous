@@ -99,16 +99,29 @@ enum Templates {
 @MainActor
 final class Summarizer: ObservableObject {
     enum State: Equatable { case idle, running, done(URL), failed(String) }
+    /// Hvor i kjøringen vi er (#39). ollama sender ingenting under lasting og
+    /// prefill, så «venter» er alt som kan sies der — med et anslag fra
+    /// forrige kjøring på samme modell når det finnes.
+    enum Phase: Equatable { case idle, waiting(estimate: TimeInterval?), streaming }
 
     @Published var text = ""
     @Published var state: State = .idle
     @Published var started: Date?
+    @Published private(set) var phase: Phase = .idle
+    /// Ord i prompten, til «Modellen leser transkripsjonen (7 716 ord)».
+    @Published private(set) var promptWords = 0
+    /// Hvor ratene lagres. Injiserbar så selfcheck ikke rører brukerens tall.
+    var estimateStore: UserDefaults = .standard
 
     /// Én linje fra strømmen. `thinking` leses ikke: det er ikke referat.
     struct Chunk: Equatable {
         let content: String
         let done: Bool
         let promptEvalCount: Int?
+        /// Fra sluttobjektet, i sekunder (ollama teller nanosekunder). Det er
+        /// disse som blir anslaget neste gang samme modell brukes.
+        let loadSeconds: Double?
+        let promptEvalSeconds: Double?
         /// ollama sender feilen som egen NDJSON-linje midt i en 200-strøm når
         /// runneren dør. Leses her, ikke bare i 404-grenen.
         let error: String?
@@ -118,6 +131,8 @@ final class Summarizer: ObservableObject {
         var message: Message?
         var done: Bool?
         var prompt_eval_count: Int?
+        var load_duration: Int64?
+        var prompt_eval_duration: Int64?
         var error: String?
     }
 
@@ -125,7 +140,10 @@ final class Summarizer: ObservableObject {
         guard let data = line.data(using: .utf8),
               let l = try? JSONDecoder().decode(Line.self, from: data) else { return nil }
         return Chunk(content: l.message?.content ?? "", done: l.done ?? false,
-                     promptEvalCount: l.prompt_eval_count, error: l.error)
+                     promptEvalCount: l.prompt_eval_count,
+                     loadSeconds: l.load_duration.map { Double($0) / 1e9 },
+                     promptEvalSeconds: l.prompt_eval_duration.map { Double($0) / 1e9 },
+                     error: l.error)
     }
 
     private let session: URLSession
@@ -155,8 +173,12 @@ final class Summarizer: ObservableObject {
         text = ""
         state = .running
         started = Date()
+        promptWords = prompt.split(whereSeparator: \.isWhitespace).count
+        phase = .waiting(estimate: Estimates.summaryEstimate(model: model, promptChars: prompt.utf8.count,
+                                                             in: estimateStore))
         task = Task { [weak self] in
             guard let self else { return }
+            defer { self.phase = .idle }
             do {
                 try await self.stream(prompt: prompt, model: model, baseURL: baseURL)
                 guard !Task.isCancelled else { return }
@@ -186,6 +208,7 @@ final class Summarizer: ObservableObject {
         task?.cancel()
         task = nil
         if state == .running { state = .idle }
+        phase = .idle
     }
 
     private struct HTTPError: Error, LocalizedError {
@@ -230,6 +253,7 @@ final class Summarizer: ObservableObject {
         for try await line in bytes.lines {
             guard let chunk = Self.parse(line) else { continue }
             if let err = chunk.error { throw StreamError(reason: "ollama avbrøt: \(err)") }
+            if !chunk.content.isEmpty, phase != .streaming { phase = .streaming }
             pending += chunk.content
             let now = Date()
             if chunk.done || now.timeIntervalSince(lastFlush) >= 0.1 {
@@ -239,6 +263,10 @@ final class Summarizer: ObservableObject {
             }
             if chunk.done {
                 if let n = chunk.promptEvalCount { NSLog("Schous referat: prompt_eval_count=%d", n) }
+                if let load = chunk.loadSeconds, let eval = chunk.promptEvalSeconds {
+                    Estimates.recordSummary(model: model, loadSeconds: load, promptSeconds: eval,
+                                            promptChars: prompt.utf8.count, in: estimateStore)
+                }
                 return
             }
         }
