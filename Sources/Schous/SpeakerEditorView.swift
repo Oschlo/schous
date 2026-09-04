@@ -1,5 +1,7 @@
 import SwiftUI
 
+enum InspectorTab: String, CaseIterable { case speakers = "Talere", summary = "Referat" }
+
 /// Vises når jobben er ferdig: gi talerne navn, slå sammen ID-er som er samme person,
 /// og skriv txt/srt/json til brukerens output-mappe. Fasit-JSON i jobbmappen røres aldri.
 struct SpeakerEditorView: View {
@@ -11,14 +13,21 @@ struct SpeakerEditorView: View {
     @State private var mergedInto: [String: String] = [:]  // SPEAKER_03 → SPEAKER_01
     @State private var status: String?
     @State private var failed = false
-    /// Det «Lagre» sist skrev, så «Vis i Finder» har noe å peke på.
+    /// Det «Eksporter» sist skrev, så «Vis i Finder» har noe å peke på.
     @State private var written: [URL] = []
-    @State private var showSpeakers = true
+
+    /// Inspektøren viser ett arbeidstrinn om gangen. `wantsInspector` er
+    /// brukerens valg; `narrow` er vinduets. Under 760 pt (620 minimum +
+    /// 240 inspektør, minus luft) ville to kolonner klemt transkripsjonen.
+    @State private var tab: InspectorTab = .speakers
+    @State private var wantsInspector = true
+    @State private var narrow = false
+    @State private var summarySelection = SummarySelection()
 
     @StateObject private var summarizer = Summarizer()
     enum Pane: String, CaseIterable { case transcript = "Transkripsjon", summary = "Referat" }
     @State private var pane: Pane = .transcript
-    /// Referat-fanen finnes bare når det er noe å vise i den.
+    /// Referat-fanen i dokumentkolonnen finnes bare når det er noe å vise i den.
     private var hasSummary: Bool { !summarizer.text.isEmpty || summarizer.state == .running }
 
     /// Alle taler-ID-er backend fant, i rekkefølgen de først dukker opp.
@@ -44,8 +53,22 @@ struct SpeakerEditorView: View {
         Dictionary(uniqueKeysWithValues: ids.map { ($0, label($0)) })
     }
 
+    private var showInspector: Binding<Bool> {
+        Binding(get: { wantsInspector && !narrow }, set: { wantsInspector = $0 })
+    }
+
     var body: some View {
         VStack(spacing: 0) {
+            WorkflowStepper(current: tab == .summary ? .summary : .speakers,
+                            completed: [.file, .transcription]) { step in
+                switch step {
+                case .file, .transcription: onNewJob()
+                case .speakers: tab = .speakers; wantsInspector = true
+                case .summary: tab = .summary; wantsInspector = true
+                }
+            }
+            .padding(.horizontal, 24).padding(.vertical, 10)
+            Divider()
             if hasSummary {
                 // Navnet er for VoiceOver; labelsHidden skjuler det bare visuelt.
                 Picker("Visning", selection: $pane) {
@@ -63,10 +86,13 @@ struct SpeakerEditorView: View {
         }
         .frame(minWidth: 340)
         .animation(.default, value: hasSummary)
+        .background(GeometryReader { g in
+            Color.clear.onChange(of: g.size.width, initial: true) { _, w in narrow = w < 760 }
+        })
         // Talere er egenskaper ved innholdet, ikke navigasjon — altså en
         // inspektør, med systemets egen kant, bredde og av/på-knapp.
-        .inspector(isPresented: $showSpeakers) {
-            sidebar.inspectorColumnWidth(min: 240, ideal: 280, max: 420)
+        .inspector(isPresented: showInspector) {
+            inspector.inspectorColumnWidth(min: 240, ideal: 300, max: 420)
         }
         .toolbar {
             ToolbarItem(placement: .navigation) {
@@ -91,16 +117,16 @@ struct SpeakerEditorView: View {
                 }
             }
             ToolbarItem(placement: .primaryAction) {
-                // ⌘⌥T, ikke ⌘⌥]: «]» er ⌥9 på norsk tastatur, så den
-                // kombinasjonen finnes ikke der.
-                Button("Talere", systemImage: "sidebar.trailing") { showSpeakers.toggle() }
-                    .keyboardShortcut("t", modifiers: [.command, .option])
-                    .help("Vis eller skjul talere og referat")
+                // Snarveien ⌘⌥T ligger i Vis-menyen (SchousApp), så verktøylinja
+                // ikke er eneste inngang. «]» er ⌥9 på norsk tastatur.
+                Button("Inspektør", systemImage: "sidebar.trailing") { wantsInspector.toggle() }
+                    .help(narrow ? "Vinduet er for smalt for inspektøren" : "Vis eller skjul talere og referat")
+                    .disabled(narrow)
             }
             ToolbarItemGroup(placement: .primaryAction) {
-                // Delt knapp: klikk lagrer standardformatene fra Innstillinger,
+                // Delt knapp: klikk skriver standardformatene fra Innstillinger,
                 // pilen skriver ett enkelt format uten å endre standarden.
-                Menu("Lagre") {
+                Menu("Eksporter") {
                     ForEach(OutputFormat.allCases) { f in
                         Button("Bare \(f.label)") { save([f]) }
                     }
@@ -110,11 +136,15 @@ struct SpeakerEditorView: View {
                 .buttonStyle(.borderedProminent)
                 .menuStyle(.button)
                 .fixedSize()
+                .help("Skriver TXT, SRT og JSON til «\(outputDir.lastPathComponent)». ⌘S")
             }
         }
         .onAppear(perform: loadMapping)
         .onReceive(NotificationCenter.default.publisher(for: .saveOutputs)) { _ in
             save(AppSettings.shared.formats)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .toggleInspector)) { _ in
+            wantsInspector.toggle()
         }
         .navigationTitle(job.base)
         // Når kjøringen starter er referatet det du venter på — vis det.
@@ -136,7 +166,7 @@ struct SpeakerEditorView: View {
                                 .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                             Text(label(s.speaker)).font(.caption.weight(.semibold))
                                 .foregroundStyle(color(for: root(s.speaker)))
-                            Text(s.language).font(.caption2).foregroundStyle(.tertiary)
+                            Text(s.language).font(.caption).foregroundStyle(.secondary)
                         }
                         Text(s.text).textSelection(.enabled)
                     }
@@ -147,68 +177,49 @@ struct SpeakerEditorView: View {
         }
     }
 
-    private var sidebar: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("Talere").font(.headline)
-                Text("Diarization deler av og til én person i flere ID-er. Slå dem sammen her.")
-                    .font(.caption).foregroundStyle(.secondary)
-
-                ForEach(ids, id: \.self) { id in
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 6) {
-                            Circle().fill(color(for: root(id))).frame(width: 8, height: 8)
-                            Text(id).font(.caption.monospaced())
-                            Spacer()
-                            Text("\(count(id)) seg").font(.caption2).foregroundStyle(.secondary)
-                        }
-                        if mergedInto[id] == nil {
-                            TextField(id, text: binding(id))
-                                .textFieldStyle(.roundedBorder)
-                        }
-                        Picker("Slå sammen med", selection: mergeBinding(id)) {
-                            Text("Egen person").tag("")
-                            ForEach(roots.filter { $0 != id }, id: \.self) { other in
-                                Text("Samme som \(label(other))").tag(other)
-                            }
-                        }
-                        .labelsHidden()
-                        .controlSize(.small)
-                        if let first = job.segments.first(where: { $0.speaker == id }) {
-                            Text("„\(first.text.prefix(70))“")
-                                .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
-                        }
-                    }
-                    Divider()
-                }
-
-                SummaryControls(jobDir: job.jobDir, summarizer: summarizer, onStart: startSummary)
+    /// Ett arbeidstrinn om gangen: Talere eller Referat. Referatets handling
+    /// står i en fast bunn, ikke nederst i et scrollfelt der vinduskanten
+    /// kan skjule den.
+    private var inspector: some View {
+        VStack(spacing: 0) {
+            Picker("Panel", selection: $tab) {
+                ForEach(InspectorTab.allCases, id: \.self) { Text($0.rawValue) }
             }
-            .padding(16)
+            .pickerStyle(.segmented).labelsHidden()
+            .padding(10)
+            Divider()
+            ScrollView {
+                Group {
+                    switch tab {
+                    case .speakers:
+                        SpeakerInspector(ids: ids, roots: roots, names: $names, mergedInto: $mergedInto,
+                                         count: count, label: label, root: root, color: color(for:),
+                                         quote: quote)
+                    case .summary:
+                        SummaryControls(jobDir: job.jobDir, summarizer: summarizer, selection: $summarySelection)
+                    }
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if tab == .summary {
+                Divider()
+                SummaryFooter(summarizer: summarizer,
+                              canStart: summarySelection.template != nil && !summarySelection.model.isEmpty
+                                        && AppSettings.shared.models != nil,
+                              start: { startSummary(summarySelection) })
+                    .padding(12)
+            }
         }
     }
 
-    // MARK: - Bindings
-
-    private func binding(_ id: String) -> Binding<String> {
-        Binding(get: { names[id] ?? "" }, set: { names[id] = $0 })
-    }
-
-    private func mergeBinding(_ id: String) -> Binding<String> {
-        Binding(
-            get: { mergedInto[id] ?? "" },
-            set: { target in
-                // Ikke la en merge peke tilbake på noe som allerede peker på id.
-                if target.isEmpty || root(target) == id {
-                    mergedInto[id] = nil
-                } else {
-                    mergedInto[id] = target
-                }
-            }
-        )
-    }
+    // MARK: - Hjelpere
 
     private func count(_ id: String) -> Int { job.segments.count { $0.speaker == id } }
+
+    private func quote(_ id: String) -> String? {
+        job.segments.first(where: { $0.speaker == id }).map { String($0.text.prefix(120)) }
+    }
 
     /// Etter posisjon, ikke `hashValue`: Swift såer Hasher på nytt per prosess,
     /// så samme taler var blå i dag og oransje etter omstart.
@@ -217,7 +228,7 @@ struct SpeakerEditorView: View {
         return palette[(ids.firstIndex(of: id) ?? 0) % palette.count]
     }
 
-    // MARK: - Lagring
+    // MARK: - Eksport
 
     private func save(_ formats: Set<OutputFormat>) {
         guard !formats.isEmpty else {
@@ -246,23 +257,24 @@ struct SpeakerEditorView: View {
     /// Lagrer først: navnene fryses nå uansett, så dette er punktet TXT/SRT
     /// skal ut. Feiler lagringen, startes ikke referatet. Endrer du et navn
     /// etterpå, er det en ny kjøring.
-    private func startSummary(template: URL, model: String, language: SummaryLanguage, context: String) {
+    private func startSummary(_ sel: SummarySelection) {
+        guard let template = sel.template else { return }
         save(AppSettings.shared.formats)
         guard !failed else { return }
         guard let body = try? String(contentsOf: template, encoding: .utf8) else {
             failed = true; status = "Kunne ikke lese \(template.lastPathComponent)."; return
         }
         let settings = AppSettings.shared
-        let prompt = Summary.prompt(body, language: language.promptValue, context: context,
+        let prompt = Summary.prompt(body, language: sel.language.promptValue, context: sel.context,
                                     transcript: transcriptText(job.segments, names: resolved),
                                     using: settings.summaryPrompt)
         let slug = Templates.slug(Templates.name(template))
         var targets = [outputDir.appending(path: "\(job.base).\(slug).md")]
         if let dir = job.jobDir {
             targets.append(dir.appending(path: "summary.\(slug).md"))
-            try? context.write(to: dir.appending(path: "context.txt"), atomically: true, encoding: .utf8)
+            try? sel.context.write(to: dir.appending(path: "context.txt"), atomically: true, encoding: .utf8)
         }
-        summarizer.run(prompt: prompt, model: model, baseURL: settings.ollamaBaseURL, writeTo: targets)
+        summarizer.run(prompt: prompt, model: sel.model, baseURL: settings.ollamaBaseURL, writeTo: targets)
     }
 
     private var mappingURL: URL? { job.jobDir?.appending(path: "speakers.json") }

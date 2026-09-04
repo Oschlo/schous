@@ -1,89 +1,82 @@
 import SwiftUI
 
-/// Valgene før et referat: mal, modell, språk, kontekst. Ligger i sidefeltet
-/// under «Talere», så rekkefølgen står der uten forklaring og transkripsjonen
-/// er synlig mens konteksten skrives. Kontekst lagres i jobbmappa som
-/// context.txt, så den henger med hvis du kjører en annen mal.
+/// Det som er valgt i Referat-fanen. Ligger hos editoren, så bunnen (knappen)
+/// og skjemaet over kan være to visninger uten å dele tilstand via
+/// summarizer.
+struct SummarySelection {
+    var template: URL?
+    var model = ""
+    var language: SummaryLanguage = .norwegian
+    var context = ""
+}
+
+/// Valgene før et referat: mal, modell, språk, kontekst. Kontekst lagres i
+/// jobbmappa som context.txt, så den henger med hvis du kjører en annen mal.
+/// Handlingen og statusen står i `SummaryFooter`, festet under skjemaet, så
+/// de er synlige uansett hvor langt skjemaet er.
 struct SummaryControls: View {
     let jobDir: URL?
     @ObservedObject var summarizer: Summarizer
-    var onStart: (URL, String, SummaryLanguage, String) -> Void
+    @Binding var selection: SummarySelection
     @ObservedObject private var settings = AppSettings.shared
 
     @State private var templates: [URL] = []
-    @State private var template: URL?
-    @State private var model = ""
-    @State private var language: SummaryLanguage = .norwegian
-    @State private var context = ""
 
     private var running: Bool { summarizer.state == .running }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Referat").font(.headline)
-            Group {
-                if templates.isEmpty {
-                    Text("Ingen maler i malmappa.").foregroundStyle(.orange).font(.callout)
-                    Button("Åpne malmappe") { Templates.open() }
-                } else {
-                    Picker("Mal", selection: $template) {
-                        ForEach(templates, id: \.self) { Text(Templates.name($0)).tag(Optional($0)) }
-                    }
-                }
-                if let models = settings.models {
-                    Picker("Modell", selection: $model) {
-                        ForEach(models, id: \.self) { Text($0).tag($0) }
-                    }
-                } else {
-                    Text("ollama svarer ikke på \(settings.ollamaURL) — kjør `ollama serve`.")
-                        .foregroundStyle(.orange).font(.callout)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Picker("Språk", selection: $language) {
-                    ForEach(SummaryLanguage.allCases) { Text($0.label).tag($0) }
-                }
-                Text("Kontekst (valgfritt): hvem var med, hva gjaldt møtet")
-                    .font(.caption).foregroundStyle(.secondary)
-                TextEditor(text: $context)
-                    .font(.body).frame(height: 60)
-                    .border(Color.secondary.opacity(0.3))
-            }
-            .disabled(running)
-
-            if running {
-                Button("Stopp") { summarizer.cancel() }
+        VStack(alignment: .leading, spacing: 10) {
+            if templates.isEmpty {
+                Text("Ingen maler i malmappa.").foregroundStyle(.orange).font(.callout)
+                Button("Åpne malmappe") { Templates.open() }
             } else {
-                Button("Lag referat") {
-                    guard let template else { return }
-                    onStart(template, model, language, context)
+                Picker("Mal", selection: $selection.template) {
+                    ForEach(templates, id: \.self) { Text(Templates.name($0)).tag(Optional($0)) }
                 }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut("r", modifiers: [.command, .shift])
-                .disabled(template == nil || model.isEmpty || settings.models == nil)
             }
-            status
+            if let models = settings.models {
+                Picker("Modell", selection: $selection.model) {
+                    ForEach(models, id: \.self) { Text($0).tag($0) }
+                }
+            } else {
+                Text("ollama svarer ikke på \(settings.ollamaURL) — kjør `ollama serve`.")
+                    .foregroundStyle(.orange).font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Picker("Språk", selection: $selection.language) {
+                ForEach(SummaryLanguage.allCases) { Text($0.label).tag($0) }
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Kontekst").font(.callout)
+                TextEditor(text: $selection.context)
+                    .font(.body)
+                    .frame(minHeight: 60)
+                    .scrollContentBackground(.hidden)
+                    .padding(4)
+                    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+                    .accessibilityLabel("Kontekst")
+                    .accessibilityHint("Hvem var med og hva møtet gjaldt. Valgfritt.")
+                Text("Valgfritt: hvem var med, hva gjaldt møtet.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
+        .disabled(running)
         .task {
             Templates.seedIfMissing()
             rescanTemplates()
-            language = settings.summaryLanguage
+            selection.language = settings.summaryLanguage
             // Alt som kan skrives i må stå klart *før* ventingen på ollama:
             // den kan ta 5 s, og feltet er ikke sperret imens.
             if let dir = jobDir,
                let saved = try? String(contentsOf: dir.appending(path: "context.txt"), encoding: .utf8) {
-                context = saved
+                selection.context = saved
             }
             if settings.models == nil { await settings.refreshModels() }
             pickModel(settings.summaryModel)
         }
         // Lista byttes ut fra Innstillinger (ny URL, «Hent modeller»); et valg
         // som ikke finnes der lenger ville sendt et 404.
-        .onChange(of: settings.models) { _, _ in pickModel(model) }
-        // Et referat tar minutter; Dock-ikonet sier fra når det er ferdig.
-        .onChange(of: summarizer.state) { _, new in
-            if case .running = new { return }
-            NSApplication.shared.requestUserAttention(.informationalRequest)
-        }
+        .onChange(of: settings.models) { _, _ in pickModel(selection.model) }
         // «Åpne malmappe» går til Finder; når vi får fokus igjen er mappa
         // kanskje ikke tom lenger.
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -95,17 +88,52 @@ struct SummaryControls: View {
     /// tag i Picker-en, og knappen ville sendt et 404.
     private func pickModel(_ wanted: String) {
         let models = settings.models ?? []
-        model = models.contains(wanted) ? wanted : (models.first ?? "")
+        selection.model = models.contains(wanted) ? wanted : (models.first ?? "")
     }
 
     private func rescanTemplates() {
         templates = Templates.list()
-        if let template, templates.contains(template) { return }
-        template = templates.first
+        if let t = selection.template, templates.contains(t) { return }
+        selection.template = templates.first
+    }
+}
+
+/// Handlingen og statusen, alltid synlig nederst i inspektøren. Statusen står
+/// her og ikke i verktøylinja: det er her blikket er når knappen trykkes, og
+/// verktøylinja har «Lagret …» fra før.
+struct SummaryFooter: View {
+    @ObservedObject var summarizer: Summarizer
+    let canStart: Bool
+    let start: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            status
+            HStack {
+                Spacer()
+                if summarizer.state == .running {
+                    Button("Stopp") { summarizer.cancel() }
+                } else {
+                    Button("Lag referat", action: start)
+                        .buttonStyle(.borderedProminent)
+                        .keyboardShortcut("r", modifiers: [.command, .shift])
+                        .disabled(!canStart)
+                }
+            }
+        }
+        // Et referat tar minutter; Dock-ikonet sier fra når det er ferdig,
+        // og VoiceOver får en setning, ikke bare en fargeendring.
+        .onChange(of: summarizer.state) { _, new in
+            switch new {
+            case .running: return
+            case .done: AccessibilityNotification.Announcement("Referatet er lagret").post()
+            case .failed: AccessibilityNotification.Announcement("Referatet feilet").post()
+            case .idle: break
+            }
+            NSApplication.shared.requestUserAttention(.informationalRequest)
+        }
     }
 
-    /// Statusen står under knappen, ikke i verktøylinja: det er her blikket
-    /// er når den trykkes, og verktøylinja har «Lagret …» fra før.
     @ViewBuilder private var status: some View {
         switch summarizer.state {
         case .running:
@@ -128,7 +156,7 @@ struct SummaryControls: View {
     }
 }
 
-/// Teksten mens den strømmer inn, og etterpå. Full høyde i venstrekolonnen;
+/// Teksten mens den strømmer inn, og etterpå. Full høyde i dokumentkolonnen;
 /// fanen over velger mellom denne og transkripsjonen.
 struct SummaryPanel: View {
     @ObservedObject var summarizer: Summarizer
@@ -137,8 +165,9 @@ struct SummaryPanel: View {
         ScrollView {
             Text(summarizer.text)
                 .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(16)
+                .frame(maxWidth: 760, alignment: .leading)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 24).padding(.vertical, 20)
         }
     }
 }
