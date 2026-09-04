@@ -152,6 +152,23 @@ final class AppSettings: ObservableObject {
     @Published var checkResult: String?
     @Published var checking = false
 
+    /// Mappa resultatene skrives til. Lå i ContentView; Innstillinger → Generelt
+    /// viser den også nå, så den må eies ett sted.
+    @Published var outputPath: String {
+        didSet { UserDefaults.standard.set(outputPath, forKey: "outputPath") }
+    }
+
+    /// Vektene ligger under ~/.cache/huggingface, og bare der: `subprocessEnv`
+    /// fjerner HF_HOME. Tomtilstanden sier «klare» eller «lastes ned ved første
+    /// kjøring» — README kaller nedlastingen første jobbs mest sannsynlige
+    /// «den henger». Navnene er katalogene huggingface_hub faktisk lager.
+    nonisolated static var modelsCached: Bool {
+        let hub = URL(fileURLWithPath: NSHomeDirectory()).appending(path: ".cache/huggingface/hub")
+        return ["models--mlx-community--whisper-large-v3-mlx",
+                "models--pyannote--speaker-diarization-community-1"]
+            .allSatisfy { FileManager.default.fileExists(atPath: hub.appending(path: $0).path) }
+    }
+
     /// Referat. Alt i UserDefaults; prompten kan justeres uten ny build.
     /// Ny URL, ny server: den gamle modellista gjelder ikke lenger.
     @Published var ollamaURL: String {
@@ -179,6 +196,7 @@ final class AppSettings: ObservableObject {
         formats = saved.map { Set($0.compactMap(OutputFormat.init(rawValue:))) }
             ?? Set(OutputFormat.allCases)
         let d = UserDefaults.standard
+        outputPath = d.string(forKey: "outputPath") ?? URL.downloadsDirectory.path
         ollamaURL = d.string(forKey: "ollamaURL") ?? "http://localhost:11434"
         summaryModel = d.string(forKey: "summaryModel") ?? ""
         summaryLanguage = SummaryLanguage(rawValue: d.string(forKey: "summaryLanguage") ?? "") ?? .norwegian

@@ -1,6 +1,11 @@
+import AVFoundation
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// Velger mellom de fire tilstandene vinduet kan stå i — tom, fil valgt,
+/// jobb i gang, ferdig — og eier det som er felles for dem: fila, slipp,
+/// Fil-menyen og Dock-spretten. Selve visningene ligger i SetupViews.swift
+/// og SpeakerEditorView.swift.
 struct ContentView: View {
     @StateObject private var job = TranscriptionJob()
     @ObservedObject private var settings = AppSettings.shared
@@ -10,21 +15,45 @@ struct ContentView: View {
     @State private var input: URL? = CommandLine.arguments.firstIndex(of: "--input")
         .flatMap { CommandLine.arguments.indices.contains($0 + 1) ? CommandLine.arguments[$0 + 1] : nil }
         .map { URL(fileURLWithPath: $0) }
-    @State private var outputPath = UserDefaults.standard.string(forKey: "outputPath")
-        ?? URL.downloadsDirectory.path
-    @State private var speakers = ""
+    /// Lydlengden i sekunder, til visning og til estimatene. nil til den er lest.
+    @State private var duration: Double?
+    /// 0 = automatisk.
+    @State private var speakers = 0
     @State private var dropping = false
 
     var body: some View {
         VStack(spacing: 0) {
             if job.state == .done {
-                SpeakerEditorView(job: job, outputDir: URL(fileURLWithPath: outputPath), onNewJob: leaveEditor)
+                SpeakerEditorView(job: job, outputDir: URL(fileURLWithPath: settings.outputPath), onNewJob: leaveEditor)
             } else {
-                setup
+                warnings
+                if let input, isBusy {
+                    JobProgressView(job: job, input: input, duration: duration)
+                } else if let input {
+                    WorkflowStepper(current: .file)
+                        .padding(.horizontal, 24).padding(.top, 16)
+                    JobSetupView(job: job, input: input, duration: duration, dropping: dropping,
+                                 speakers: $speakers, pickInput: pickInput, pickOutput: pickOutput,
+                                 start: start, openResult: { job.loadFinished(input: input) })
+                } else {
+                    EmptyStateView(dropping: dropping, pickFile: pickInput)
+                }
             }
         }
         .frame(minWidth: 620, minHeight: 460)
         .animation(.default, value: job.state)
+        .animation(.default, value: input)
+        // Hele vinduet tar imot slipp; den stiplede boksen er bare hintet.
+        .dropDestination(for: URL.self) { urls, _ in
+            guard let url = urls.first, !isBusy else { return false }
+            open(url)
+            return true
+        } isTargeted: { dropping = $0 && !isBusy }
+        .task(id: input) {
+            duration = nil
+            guard let input else { return }
+            duration = try? await AVURLAsset(url: input).load(.duration).seconds
+        }
         // Et ferdig menylinje-opptak forhåndsvelges, klart til å transkriberes.
         .onReceive(Recorder.shared.$lastRecording.compactMap { $0 }) { input = $0 }
         // Finder «Åpne med» og fil sluppet på Dock-ikonet (CFBundleDocumentTypes).
@@ -33,176 +62,52 @@ struct ContentView: View {
             if !isBusy { pickInput() }
         }
         // Dock-ikonet spretter når jobben er ferdig og appen ikke er fremst;
-        // er den fremst, ignorerer macOS forespørselen selv.
+        // er den fremst, ignorerer macOS forespørselen selv. VoiceOver får
+        // beskjed uansett — en fargeendring og et sprett er ikke en melding.
         .onChange(of: job.state) { _, new in
             switch new {
-            case .done, .stopped, .failed: NSApplication.shared.requestUserAttention(.informationalRequest)
+            case .done:
+                NSApplication.shared.requestUserAttention(.informationalRequest)
+                announce("Transkripsjonen er ferdig")
+            case .stopped(let n):
+                NSApplication.shared.requestUserAttention(.informationalRequest)
+                announce("Stoppet. \(n) segmenter er skrevet")
+            case .failed:
+                NSApplication.shared.requestUserAttention(.informationalRequest)
+                announce("Transkripsjonen feilet")
+            case .paused:
+                announce("Pauset")
             default: break
             }
         }
     }
 
-    // MARK: - Oppsett + kjøring
-
-    private var setup: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            dropZone
-
-            // Menylinjemenyen lukkes av selve stopp-klikket, og miksingen blir
-            // ferdig først etterpå — sto feilen bare der, ville ingen sett den.
-            // Varselet under opptak vises begge steder: menyen er der man ser
-            // det raskest, vinduet er der det fortsatt står hvis menyen var lukket.
-            if let warning = recorder.liveWarning {
-                Label(warning, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-                    .font(.callout)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            if let error = recorder.errorMessage {
-                Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-                    .font(.callout)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            // Resten finnes først når det er en fil å kjøre på. Uten fil er
-            // vinduet bare slippsonen — det er hele oppgaven på det tidspunktet.
-            if input != nil {
-                HStack {
-                    Text("Lagre i").frame(width: 70, alignment: .leading)
-                    Text(URL(fileURLWithPath: outputPath).lastPathComponent)
-                        .lineLimit(1).truncationMode(.head)
-                        .foregroundStyle(.secondary)
-                    Button("Velg…", action: pickOutput)
-                    Spacer()
-                    Text("Talere").foregroundStyle(.secondary)
-                    TextField("auto", text: $speakers)
-                        .frame(width: 52).textFieldStyle(.roundedBorder)
-                        .help("Antall talere hvis kjent. Tomt = automatisk.")
-                }
-                .disabled(isBusy)
-
-                progress
-            }
-            Spacer(minLength: 0)
-            if input != nil { controls }
-        }
-        .padding(20)
-        .animation(.default, value: input)
-        // Hele vinduet tar imot slipp; den stiplede boksen er bare hintet.
-        .dropDestination(for: URL.self) { urls, _ in
-            guard let url = urls.first, !isBusy else { return false }
-            input = url
-            return true
-        } isTargeted: { dropping = $0 && !isBusy }
-    }
-
-    private var dropZone: some View {
-        RoundedRectangle(cornerRadius: 10)
-            .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [6]))
-            .foregroundStyle(dropping ? Color.accentColor : Color.secondary.opacity(0.4))
-            .background(dropping ? Color.accentColor.opacity(0.07) : .clear)
-            .frame(height: 110)
-            .animation(.easeOut(duration: 0.15), value: dropping)
-            .overlay {
-                VStack(spacing: 6) {
-                    if let input {
-                        Text(input.lastPathComponent).font(.headline).lineLimit(1)
-                        Text(input.deletingLastPathComponent().path)
-                            .font(.caption).foregroundStyle(.secondary)
-                            .lineLimit(1).truncationMode(.head)
-                    } else {
-                        Image(systemName: "waveform").font(.title).foregroundStyle(.secondary)
-                        Text("Dra en lyd- eller videofil hit").foregroundStyle(.secondary)
-                    }
-                    Button(input == nil ? "Velg fil…" : "Bytt fil…", action: pickInput)
-                        .buttonStyle(.link)
+    /// Menylinjemenyen lukkes av selve stopp-klikket, og miksingen blir ferdig
+    /// først etterpå — sto feilen bare der, ville ingen sett den. Varselet
+    /// under opptak vises begge steder: menyen er der man ser det raskest,
+    /// vinduet er der det fortsatt står hvis menyen var lukket.
+    @ViewBuilder private var warnings: some View {
+        let lines = [recorder.liveWarning, recorder.errorMessage].compactMap { $0 }
+        if !lines.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(lines, id: \.self) { line in
+                    Label(line, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange).font(.callout)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
-    }
-
-    @ViewBuilder private var progress: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            switch job.state {
-            case .failed(let msg):
-                Label(msg, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.red).font(.callout)
-                    .fixedSize(horizontal: false, vertical: true)
-            case .stopped(let n):
-                Label("Stoppet. \(n) segmenter er skrevet — «Start transkribering» "
-                      + "fortsetter der den slapp.", systemImage: "pause.circle.fill")
-                    .foregroundStyle(.orange).font(.callout)
-                    .fixedSize(horizontal: false, vertical: true)
-            case .running, .paused:
-                HStack {
-                    Text("\(job.step)/4 \(job.stepLabel)").font(.callout.weight(.medium))
-                    if job.state == .paused {
-                        Text("— pauset").foregroundStyle(.orange).font(.callout)
-                    }
-                    Spacer()
-                    if job.step == 4, job.total > 0 {
-                        Text("\(job.done)/\(job.total)\(job.eta.isEmpty ? "" : " · \(job.eta) igjen")")
-                            .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                    }
-                }
-                if let f = job.fraction {
-                    ProgressView(value: f)
-                } else {
-                    ProgressView().progressViewStyle(.linear)
-                }
-                Text(job.detail.isEmpty ? " " : job.detail)
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            default:
-                if let input, TranscriptionJob.finishedOutput(for: input) != nil {
-                    Label("Denne fila er transkribert tidligere.", systemImage: "checkmark.circle")
-                        .foregroundStyle(.secondary).font(.callout)
-                }
-                if !settings.isConfigured {
-                    // En lenke, ikke en beskjed om å trykke ⌘, — knappen under er
-                    // slått av, så dette er den eneste veien videre herfra.
-                    SettingsLink {
-                        Label("Backend er ikke satt opp — åpne Innstillinger", systemImage: "gearshape")
-                            .foregroundStyle(.orange).font(.callout)
-                    }
-                    .buttonStyle(.link)
-                }
-            }
-        }
-        .frame(height: 64, alignment: .top)
-    }
-
-    private var controls: some View {
-        HStack {
-            if case .running = job.state {
-                Button("Pause", systemImage: "pause.fill") { job.pause() }
-                    .keyboardShortcut("p", modifiers: [.command, .shift])
-            } else if case .paused = job.state {
-                Button("Fortsett", systemImage: "play.fill") { job.resume() }
-                    .keyboardShortcut("p", modifiers: [.command, .shift])
-            }
-            Spacer()
-            if isBusy {
-                // Ingen bekreftelsesdialog: backend skriver hvert ferdige segment
-                // til disk og gjenopptar der den slapp, så Stopp koster ingenting.
-                Button("Stopp") { job.stop() }
-                    .keyboardShortcut(".")
-                    .help("Skriver det som er ferdig. En ny start fortsetter der den slapp.")
-            } else {
-                if let input, TranscriptionJob.finishedOutput(for: input) != nil {
-                    Button("Åpne resultat") { job.loadFinished(input: input) }
-                }
-                Button("Start transkribering") { start() }
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(input == nil || !settings.isConfigured)
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 24).padding(.top, 16)
         }
     }
 
     private var isBusy: Bool { job.state == .running || job.state == .paused }
 
     // MARK: - Handlinger
+
+    private func announce(_ text: String) {
+        AccessibilityNotification.Announcement(text).post()
+    }
 
     private func leaveEditor() {
         job.state = .idle
@@ -211,7 +116,7 @@ struct ContentView: View {
 
     private func start() {
         guard let input else { return }
-        job.start(input: input, speakers: Int(speakers.trimmingCharacters(in: .whitespaces)))
+        job.start(input: input, speakers: speakers == 0 ? nil : speakers, audioSeconds: duration ?? 0)
     }
 
     private func pickInput() {
@@ -239,9 +144,7 @@ struct ContentView: View {
             // ⌘⇧G kan returnere en fil selv med canChooseFiles = false — bruk mappen den ligger i.
             var isDir: ObjCBool = false
             let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
-            let dir = (exists && isDir.boolValue) ? url : url.deletingLastPathComponent()
-            outputPath = dir.path
-            UserDefaults.standard.set(dir.path, forKey: "outputPath")
+            settings.outputPath = ((exists && isDir.boolValue) ? url : url.deletingLastPathComponent()).path
         }
     }
 }

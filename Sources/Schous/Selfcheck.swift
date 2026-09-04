@@ -185,6 +185,9 @@ func runSelfcheckAndExit() -> Never {
     loaded.loadFinished(input: fakeInput)
     check(loaded.state == .done && loaded.segments.count == 1 && loaded.base == "selfcheck-input",
           "loadFinished: \(loaded.state) \(loaded.segments.count) \(loaded.base)")
+    let info = TranscriptionJob.finishedInfo(for: fakeInput)
+    check(info?.segments == 1 && info.map { Date().timeIntervalSince($0.modified) < 60 } == true,
+          "finishedInfo: \(String(describing: info))")
     try? FileManager.default.removeItem(at: fakeJob)
 
     let srt = try! String(contentsOf: dir.appending(path: "t.srt"), encoding: .utf8)

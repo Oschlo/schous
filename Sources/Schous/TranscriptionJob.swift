@@ -110,6 +110,19 @@ final class TranscriptionJob: ObservableObject {
         return fm.fileExists(atPath: json.path) && !fm.fileExists(atPath: partial.path) ? json : nil
     }
 
+    struct FinishedInfo { let segments: Int; let modified: Date }
+
+    /// Til «Ferdig · 5 segmenter · sist endret …» i oppsettet. Leser fila; den
+    /// er liten, og kalles fra .task, ikke fra body.
+    static func finishedInfo(for input: URL) -> FinishedInfo? {
+        guard let json = finishedOutput(for: input),
+              let data = try? Data(contentsOf: json),
+              let segs = try? JSONDecoder().decode([Segment].self, from: data),
+              let date = try? json.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+        else { return nil }
+        return FinishedInfo(segments: segs.count, modified: date)
+    }
+
     /// Laster en ferdig jobb rett inn i editoren. Egen knapp, ikke en snarvei
     /// i start(): den som endrer «Talere» og trykker Start skal få en ny
     /// kjøring, ikke forrige svar.
