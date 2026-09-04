@@ -18,10 +18,7 @@ struct ContentView: View {
     var body: some View {
         VStack(spacing: 0) {
             if job.state == .done {
-                SpeakerEditorView(job: job, outputDir: URL(fileURLWithPath: outputPath)) {
-                    job.state = .idle
-                    job.step = 0
-                }
+                SpeakerEditorView(job: job, outputDir: URL(fileURLWithPath: outputPath), onNewJob: leaveEditor)
             } else {
                 setup
             }
@@ -30,6 +27,9 @@ struct ContentView: View {
         .animation(.default, value: job.state)
         // Et ferdig menylinje-opptak forhåndsvelges, klart til å transkriberes.
         .onReceive(Recorder.shared.$lastRecording.compactMap { $0 }) { input = $0 }
+        // Ny fil mens editoren står framme: body velges på job.state, ikke på
+        // input, så uten dette ser valget ut som om det ikke skjedde.
+        .onChange(of: input) { _, _ in if job.state == .done { leaveEditor() } }
         // Finder «Åpne med» og fil sluppet på Dock-ikonet (CFBundleDocumentTypes).
         .onOpenURL { if !isBusy { input = $0 } }
         .onReceive(NotificationCenter.default.publisher(for: .openFile)) { _ in
@@ -206,6 +206,11 @@ struct ContentView: View {
     private var isBusy: Bool { job.state == .running || job.state == .paused }
 
     // MARK: - Handlinger
+
+    private func leaveEditor() {
+        job.state = .idle
+        job.step = 0
+    }
 
     private func start() {
         guard let input else { return }
