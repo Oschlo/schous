@@ -58,6 +58,7 @@ struct SummaryControls: View {
                     onStart(template, model, language, context)
                 }
                 .buttonStyle(.borderedProminent)
+                .keyboardShortcut("r", modifiers: [.command, .shift])
                 .disabled(template == nil || model.isEmpty || settings.models == nil)
             }
             status
@@ -78,6 +79,11 @@ struct SummaryControls: View {
         // Lista byttes ut fra Innstillinger (ny URL, «Hent modeller»); et valg
         // som ikke finnes der lenger ville sendt et 404.
         .onChange(of: settings.models) { _, _ in pickModel(model) }
+        // Et referat tar minutter; Dock-ikonet sier fra når det er ferdig.
+        .onChange(of: summarizer.state) { _, new in
+            if case .running = new { return }
+            NSApplication.shared.requestUserAttention(.informationalRequest)
+        }
         // «Åpne malmappe» går til Finder; når vi får fokus igjen er mappa
         // kanskje ikke tom lenger.
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in

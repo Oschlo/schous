@@ -11,6 +11,9 @@ struct SpeakerEditorView: View {
     @State private var mergedInto: [String: String] = [:]  // SPEAKER_03 → SPEAKER_01
     @State private var status: String?
     @State private var failed = false
+    /// Det «Lagre» sist skrev, så «Vis i Finder» har noe å peke på.
+    @State private var written: [URL] = []
+    @State private var showSpeakers = true
 
     @StateObject private var summarizer = Summarizer()
     enum Pane: String, CaseIterable { case transcript = "Transkripsjon", summary = "Referat" }
@@ -42,35 +45,57 @@ struct SpeakerEditorView: View {
     }
 
     var body: some View {
-        HSplitView {
-            VStack(spacing: 0) {
-                if hasSummary {
-                    Picker("", selection: $pane) {
-                        ForEach(Pane.allCases, id: \.self) { Text($0.rawValue) }
-                    }
-                    .pickerStyle(.segmented).labelsHidden()
-                    .padding(8)
-                    Divider()
+        VStack(spacing: 0) {
+            if hasSummary {
+                // Navnet er for VoiceOver; labelsHidden skjuler det bare visuelt.
+                Picker("Visning", selection: $pane) {
+                    ForEach(Pane.allCases, id: \.self) { Text($0.rawValue) }
                 }
-                if pane == .summary, hasSummary {
-                    SummaryPanel(summarizer: summarizer)
-                } else {
-                    transcript
-                }
+                .pickerStyle(.segmented).labelsHidden()
+                .padding(8)
+                Divider()
             }
-            .frame(minWidth: 340)
-            sidebar
+            if pane == .summary, hasSummary {
+                SummaryPanel(summarizer: summarizer)
+            } else {
+                transcript
+            }
+        }
+        .frame(minWidth: 340)
+        .animation(.default, value: hasSummary)
+        // Talere er egenskaper ved innholdet, ikke navigasjon — altså en
+        // inspektør, med systemets egen kant, bredde og av/på-knapp.
+        .inspector(isPresented: $showSpeakers) {
+            sidebar.inspectorColumnWidth(min: 240, ideal: 280, max: 420)
         }
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 // Det knappen alltid har gjort: tilbake til oppsettet, med fila
                 // fortsatt valgt. «Ny fil» var feil navn på det.
+                // ⌘↑ som Finders «Overordnet mappe», ikke ⌘[: «[» er ⌥8 på
+                // norsk tastatur, og målt her nådde ⌘⌥8 aldri knappen.
                 Button("Tilbake", systemImage: "chevron.left", action: onNewJob)
+                    .keyboardShortcut(.upArrow)
             }
             ToolbarItem(placement: .status) {
                 if let status {
-                    Text(status).font(.callout).foregroundStyle(failed ? .red : .secondary)
+                    HStack(spacing: 6) {
+                        Text(status).font(.callout).foregroundStyle(failed ? .red : .secondary)
+                        if !failed, let first = written.first {
+                            Button("Vis i Finder") {
+                                NSWorkspace.shared.activateFileViewerSelecting([first])
+                            }
+                            .buttonStyle(.link).font(.callout)
+                        }
+                    }
                 }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                // ⌘⌥T, ikke ⌘⌥]: «]» er ⌥9 på norsk tastatur, så den
+                // kombinasjonen finnes ikke der.
+                Button("Talere", systemImage: "sidebar.trailing") { showSpeakers.toggle() }
+                    .keyboardShortcut("t", modifiers: [.command, .option])
+                    .help("Vis eller skjul talere og referat")
             }
             ToolbarItemGroup(placement: .primaryAction) {
                 // Delt knapp: klikk lagrer standardformatene fra Innstillinger,
@@ -88,6 +113,9 @@ struct SpeakerEditorView: View {
             }
         }
         .onAppear(perform: loadMapping)
+        .onReceive(NotificationCenter.default.publisher(for: .saveOutputs)) { _ in
+            save(AppSettings.shared.formats)
+        }
         .navigationTitle(job.base)
         // Når kjøringen starter er referatet det du venter på — vis det.
         .onChange(of: summarizer.state) { _, new in
@@ -138,7 +166,7 @@ struct SpeakerEditorView: View {
                             TextField(id, text: binding(id))
                                 .textFieldStyle(.roundedBorder)
                         }
-                        Picker("", selection: mergeBinding(id)) {
+                        Picker("Slå sammen med", selection: mergeBinding(id)) {
                             Text("Egen person").tag("")
                             ForEach(roots.filter { $0 != id }, id: \.self) { other in
                                 Text("Samme som \(label(other))").tag(other)
@@ -158,7 +186,6 @@ struct SpeakerEditorView: View {
             }
             .padding(16)
         }
-        .frame(minWidth: 240, idealWidth: 280)
     }
 
     // MARK: - Bindings
@@ -183,9 +210,11 @@ struct SpeakerEditorView: View {
 
     private func count(_ id: String) -> Int { job.segments.count { $0.speaker == id } }
 
+    /// Etter posisjon, ikke `hashValue`: Swift såer Hasher på nytt per prosess,
+    /// så samme taler var blå i dag og oransje etter omstart.
     private func color(for id: String) -> Color {
         let palette: [Color] = [.blue, .orange, .green, .purple, .pink, .teal, .indigo, .brown]
-        return palette[abs(id.hashValue) % palette.count]
+        return palette[(ids.firstIndex(of: id) ?? 0) % palette.count]
     }
 
     // MARK: - Lagring
@@ -197,8 +226,8 @@ struct SpeakerEditorView: View {
             return
         }
         do {
-            let written = try writeOutputs(job.segments, to: outputDir, base: job.base,
-                                           names: resolved, formats: formats)
+            written = try writeOutputs(job.segments, to: outputDir, base: job.base,
+                                       names: resolved, formats: formats)
             saveMapping()
             failed = false
             let list = written.map { $0.pathExtension.uppercased() }.joined(separator: ", ")

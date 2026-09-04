@@ -9,6 +9,7 @@ struct SchousApp: App {
         // SwiftPM-binærer starter uten Dock-ikon/fokus; .app-bundlen trenger dette eksplisitt.
         NSApplication.shared.setActivationPolicy(.regular)
         NSApplication.shared.activate(ignoringOtherApps: true)
+        Hotkey.register()
     }
 
     var body: some Scene {
@@ -21,6 +22,18 @@ struct SchousApp: App {
                 .task { await Updater.shared.checkIfDue() }
         }
         .windowResizability(.contentMinSize)
+        // Fil-menyen: Åpne… og Lagre. Menyen vet ikke hvilken visning som står
+        // i vinduet, så den sier bare fra; den som lytter, handler.
+        .commands {
+            CommandGroup(replacing: .newItem) {
+                Button("Åpne…") { NotificationCenter.default.post(name: .openFile, object: nil) }
+                    .keyboardShortcut("o")
+            }
+            CommandGroup(replacing: .saveItem) {
+                Button("Lagre") { NotificationCenter.default.post(name: .saveOutputs, object: nil) }
+                    .keyboardShortcut("s")
+            }
+        }
 
         Settings {
             SettingsView()
@@ -53,6 +66,11 @@ private extension NSImage {
     }()
 }
 
+extension Notification.Name {
+    static let openFile = Notification.Name("co.oschlo.schous.openFile")
+    static let saveOutputs = Notification.Name("co.oschlo.schous.saveOutputs")
+}
+
 private struct MenuBarContent: View {
     @ObservedObject var recorder: Recorder
     @ObservedObject private var updater = Updater.shared
@@ -65,6 +83,9 @@ private struct MenuBarContent: View {
             // Etter stopp: løft vinduet, der opptaket nå ligger forhåndsvalgt.
             if wasRecording { showWindow() }
         }
+        // Viser snarveien. Selve tastetrykket tas av Hotkey.swift, globalt —
+        // en meny-snarvei virker bare mens menyen står åpen.
+        .keyboardShortcut("r", modifiers: [.control, .option])
         if recorder.isRecording {
             // Nivået mens det pågår. Et dødt spor oppdaget etter at møtet er
             // over er en obduksjon; dette er tidsnok til å gjøre noe.

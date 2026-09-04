@@ -18,17 +18,28 @@ struct ContentView: View {
     var body: some View {
         VStack(spacing: 0) {
             if job.state == .done {
-                SpeakerEditorView(job: job, outputDir: URL(fileURLWithPath: outputPath)) {
-                    job.state = .idle
-                    job.step = 0
-                }
+                SpeakerEditorView(job: job, outputDir: URL(fileURLWithPath: outputPath), onNewJob: leaveEditor)
             } else {
                 setup
             }
         }
         .frame(minWidth: 620, minHeight: 460)
+        .animation(.default, value: job.state)
         // Et ferdig menylinje-opptak forhåndsvelges, klart til å transkriberes.
         .onReceive(Recorder.shared.$lastRecording.compactMap { $0 }) { input = $0 }
+        // Finder «Åpne med» og fil sluppet på Dock-ikonet (CFBundleDocumentTypes).
+        .onOpenURL { if !isBusy { open($0) } }
+        .onReceive(NotificationCenter.default.publisher(for: .openFile)) { _ in
+            if !isBusy { pickInput() }
+        }
+        // Dock-ikonet spretter når jobben er ferdig og appen ikke er fremst;
+        // er den fremst, ignorerer macOS forespørselen selv.
+        .onChange(of: job.state) { _, new in
+            switch new {
+            case .done, .stopped, .failed: NSApplication.shared.requestUserAttention(.informationalRequest)
+            default: break
+            }
+        }
     }
 
     // MARK: - Oppsett + kjøring
@@ -55,25 +66,36 @@ struct ContentView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            HStack {
-                Text("Lagre i").frame(width: 70, alignment: .leading)
-                Text(URL(fileURLWithPath: outputPath).lastPathComponent)
-                    .lineLimit(1).truncationMode(.head)
-                    .foregroundStyle(.secondary)
-                Button("Velg…", action: pickOutput)
-                Spacer()
-                Text("Talere").foregroundStyle(.secondary)
-                TextField("auto", text: $speakers)
-                    .frame(width: 52).textFieldStyle(.roundedBorder)
-                    .help("Antall talere hvis kjent. Tomt = automatisk.")
-            }
-            .disabled(isBusy)
+            // Resten finnes først når det er en fil å kjøre på. Uten fil er
+            // vinduet bare slippsonen — det er hele oppgaven på det tidspunktet.
+            if input != nil {
+                HStack {
+                    Text("Lagre i").frame(width: 70, alignment: .leading)
+                    Text(URL(fileURLWithPath: outputPath).lastPathComponent)
+                        .lineLimit(1).truncationMode(.head)
+                        .foregroundStyle(.secondary)
+                    Button("Velg…", action: pickOutput)
+                    Spacer()
+                    Text("Talere").foregroundStyle(.secondary)
+                    TextField("auto", text: $speakers)
+                        .frame(width: 52).textFieldStyle(.roundedBorder)
+                        .help("Antall talere hvis kjent. Tomt = automatisk.")
+                }
+                .disabled(isBusy)
 
-            progress
+                progress
+            }
             Spacer(minLength: 0)
-            controls
+            if input != nil { controls }
         }
         .padding(20)
+        .animation(.default, value: input)
+        // Hele vinduet tar imot slipp; den stiplede boksen er bare hintet.
+        .dropDestination(for: URL.self) { urls, _ in
+            guard let url = urls.first, !isBusy else { return false }
+            input = url
+            return true
+        } isTargeted: { dropping = $0 && !isBusy }
     }
 
     private var dropZone: some View {
@@ -82,6 +104,7 @@ struct ContentView: View {
             .foregroundStyle(dropping ? Color.accentColor : Color.secondary.opacity(0.4))
             .background(dropping ? Color.accentColor.opacity(0.07) : .clear)
             .frame(height: 110)
+            .animation(.easeOut(duration: 0.15), value: dropping)
             .overlay {
                 VStack(spacing: 6) {
                     if let input {
@@ -97,11 +120,6 @@ struct ContentView: View {
                         .buttonStyle(.link)
                 }
             }
-            .dropDestination(for: URL.self) { urls, _ in
-                guard let url = urls.first, !isBusy else { return false }
-                input = url
-                return true
-            } isTargeted: { dropping = $0 && !isBusy }
     }
 
     @ViewBuilder private var progress: some View {
@@ -141,9 +159,13 @@ struct ContentView: View {
                         .foregroundStyle(.secondary).font(.callout)
                 }
                 if !settings.isConfigured {
-                    Label("Backend er ikke satt opp — åpne Innstillinger (⌘,)",
-                          systemImage: "gearshape")
-                        .foregroundStyle(.orange).font(.callout)
+                    // En lenke, ikke en beskjed om å trykke ⌘, — knappen under er
+                    // slått av, så dette er den eneste veien videre herfra.
+                    SettingsLink {
+                        Label("Backend er ikke satt opp — åpne Innstillinger", systemImage: "gearshape")
+                            .foregroundStyle(.orange).font(.callout)
+                    }
+                    .buttonStyle(.link)
                 }
             }
         }
@@ -154,14 +176,17 @@ struct ContentView: View {
         HStack {
             if case .running = job.state {
                 Button("Pause", systemImage: "pause.fill") { job.pause() }
+                    .keyboardShortcut("p", modifiers: [.command, .shift])
             } else if case .paused = job.state {
                 Button("Fortsett", systemImage: "play.fill") { job.resume() }
+                    .keyboardShortcut("p", modifiers: [.command, .shift])
             }
             Spacer()
             if isBusy {
                 // Ingen bekreftelsesdialog: backend skriver hvert ferdige segment
                 // til disk og gjenopptar der den slapp, så Stopp koster ingenting.
                 Button("Stopp") { job.stop() }
+                    .keyboardShortcut(".")
                     .help("Skriver det som er ferdig. En ny start fortsetter der den slapp.")
             } else {
                 if let input, TranscriptionJob.finishedOutput(for: input) != nil {
@@ -169,6 +194,7 @@ struct ContentView: View {
                 }
                 Button("Start transkribering") { start() }
                     .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
                     .disabled(input == nil || !settings.isConfigured)
             }
         }
@@ -177,6 +203,11 @@ struct ContentView: View {
     private var isBusy: Bool { job.state == .running || job.state == .paused }
 
     // MARK: - Handlinger
+
+    private func leaveEditor() {
+        job.state = .idle
+        job.step = 0
+    }
 
     private func start() {
         guard let input else { return }
@@ -187,7 +218,16 @@ struct ContentView: View {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.audio, .movie, .mpeg4Movie]
         panel.prompt = "Velg"
-        if panel.runModal() == .OK { input = panel.url }
+        if panel.runModal() == .OK, let url = panel.url { open(url) }
+    }
+
+    /// Ny fil valgt med vilje: body velges på job.state, ikke på input, så
+    /// editoren må forlates eksplisitt. Et ferdig opptak (`lastRecording`) går
+    /// ikke hit — det bare forhåndsvelges, ellers rev opptaksstoppet ned
+    /// editoren midt i talernavn som ikke var lagret, og avbrøt et referat.
+    private func open(_ url: URL) {
+        input = url
+        if job.state == .done { leaveEditor() }
     }
 
     private func pickOutput() {

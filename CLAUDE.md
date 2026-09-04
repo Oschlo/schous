@@ -622,6 +622,42 @@ falls back to an SF Symbol. Edit the sprite in `icon.py` and both icons rebuild.
 It runs on the real-time thread, which is why it takes an `AudioBufferList`
 rather than arrays. `--selfcheck` covers it.
 
+## Snarveier, Fil-menyen og hurtigtasten
+
+Fire ting som ser vilkårlige ut i koden og ikke er det:
+
+- **⌃⌥R er Carbon, ikke NSEvent.** `RegisterEventHotKey` i `Hotkey.swift` er
+  den eneste offentlige veien til en global tast uten
+  tilgjengelighetstillatelse; en `NSEvent.addGlobalMonitorForEvents` krever den
+  og ser dessuten bare, den stjeler ikke. Handleren er en C-funksjonspeker og
+  kan derfor ikke fange noe — alt den trenger står som `static`, og
+  `Hotkey.showMainWindow()` må kvalifiseres, ellers regner kompilatoren det
+  som fanget kontekst. Carbon leverer på hovedtråden, så
+  `MainActor.assumeIsolated` er en påstand som holder, ikke en gjetning.
+  Målt 2026-09-04 fra Finder: første trykk startet opptak, andre stoppet,
+  skrev fila og gjorde Schous fremst. Kombinasjonen er fast. `.keyboardShortcut`
+  på menyknappen *viser* den bare; en menysnarvei virker kun mens menyen er
+  åpen.
+- **Fil-menyen sier fra, den handler ikke.** `.commands` bor på scenen og vet
+  ikke om vinduet viser oppsettet eller editoren, og `FocusedValue` er mer
+  kode enn det er verdt for to elementer. «Åpne…» og «Lagre» poster derfor
+  `.openFile`/`.saveOutputs`, og visningen som er framme lytter. Prisen: ⌘S
+  utenfor editoren gjør ingenting, stille. Det er kjent og godtatt.
+- **Dock-spretten har ingen «er appen aktiv»-sjekk med vilje.**
+  `requestUserAttention` ignoreres av macOS når appen alt er fremst, så en
+  sjekk foran ville bare gjentatt den. Kalles på `.done`, `.stopped` og
+  `.failed`, og når referatet er ferdig. Ikke målt at ikonet faktisk spretter —
+  System Events ser det ikke, og en ekte kjøring tar minutter.
+- **`CFBundleDocumentTypes` er det som gir «Åpne med» og slipp på Dock-ikonet.**
+  `onOpenURL` i `ContentView` får fila. LaunchServices leser claimet når
+  bundlen `open`-es; henger «Åpne med» etter en rebuild, tving det med
+  `lsregister -f Schous.app` (under
+  `/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/`).
+  Verifiser med `lsregister -dump | grep -A6 'Lyd- eller videofil'`.
+
+Talerfargene indekseres etter posisjon i `ids`, ikke `hashValue`: Swift såer
+`Hasher` per prosess, så samme taler byttet farge ved hver omstart.
+
 ## Output format is a byte-exact port
 
 `writeOutputs` in `Segment.swift` reimplements the backend's `write_outputs`
@@ -661,6 +697,16 @@ limitation, not a UI nicety. `root()` follows merge chains with a hop limit;
   app som står og venter på en dialog. Bygg med «Schous Dev»-identiteten, og hvis
   et spørsmål likevel er ventet: si fra til brukeren og vent på svar før du
   måler, ikke gjett på en delay.
+- **Låst skjerm ser ut som en app uten vindu.** Målt 2026-09-04: med
+  `CGSSessionScreenIsLocked = Yes` (`ioreg -n Root -d1 | grep IOConsoleUsers`)
+  svarer System Events `0 windows` for både ny og gammel build, `activate`
+  gjør ikke appen `frontmost`, `screencapture` feiler med «could not create
+  image from display», og et syntetisk `key code` når ikke Carbon-hurtigtasten.
+  Menyene i menylinja *kan* leses, så en test som kun ser på dem står grønn.
+  Sjekk låsen før du bisekterer en «vinduet forsvant»-regresjon.
+- **`[` og `]` er ⌥8 og ⌥9 på norsk tastatur.** ⌘[ for «Tilbake» nådde aldri
+  knappen her — målt med ⌘⌥8 via System Events, tittelen sto. Derfor ⌘↑ og
+  ⌘⌥T, ikke ⌘[ og ⌘⌥], uansett hva Finder gjør.
 - **`prosess-status: S` beviser ingenting.** En app som står og venter på en
   TCC-dialog ser ut som en app som kjører helt fint. Det gjelder `codesign` i
   `bundle.sh` også, som venter på nøkkelringen. Dialogen
