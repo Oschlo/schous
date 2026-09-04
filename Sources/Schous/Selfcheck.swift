@@ -9,6 +9,7 @@ func runSelfcheckAndExit() -> Never {
     recorderSelfcheck()
     updateSelfcheck()
     summarizerSelfcheck()
+    summarizerNetworkSelfcheck()
 
     let job = TranscriptionJob()
 
@@ -425,6 +426,124 @@ private func summarizerSelfcheck() {
     Templates.seedIfMissing(into: dir, from: seeds)
     check(Templates.list(in: dir).isEmpty, "tom mappe ble seedet på nytt")
     try? FileManager.default.removeItem(at: root)
+}
+
+/// Referat: NDJSON-parseren mot ordrette ollama-linjer (0.33.3), og klienten
+/// mot en ekte socket via `nc -l`. Stubb i prosess ville ikke bevist at
+/// timeoutIntervalForRequest faktisk utløser.
+@MainActor
+private func summarizerNetworkSelfcheck() {
+    let thinking = #"{"model":"qwen3.8:27b-mlx","created_at":"2026-09-04T09:17:09.179986Z","message":{"role":"assistant","content":"","thinking":"The"},"done":false}"#
+    let content = #"{"model":"qwen3.8:27b-mlx","created_at":"2026-09-04T09:16:35.191059Z","message":{"role":"assistant","content":"hei"},"done":false}"#
+    let done = #"{"model":"qwen3.8:27b-mlx","created_at":"2026-09-04T09:16:35.31501Z","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","total_duration":7144189292,"load_duration":6040992125,"prompt_eval_count":16,"prompt_eval_cached_count":0,"prompt_eval_duration":683572250,"eval_count":1,"eval_duration":417508667}"#
+
+    // Tenking er ikke tekst. Slipper den inn, står modellens grubling i referatet.
+    let t = Summarizer.parse(thinking)
+    check(t?.content == "" && t?.done == false, "thinking-bit: \(String(describing: t))")
+    let c = Summarizer.parse(content)
+    check(c?.content == "hei" && c?.done == false, "content-bit: \(String(describing: c))")
+    let d = Summarizer.parse(done)
+    check(d?.done == true && d?.promptEvalCount == 16, "sluttobjekt: \(String(describing: d))")
+    check(Summarizer.parse("ikke json") == nil, "støy skal gi nil, ikke krasj")
+
+    // Klienten mot en ekte prosess. Én forbindelse per nc; hvert tilfelle får
+    // sin egen port.
+    let out = URL.temporaryDirectory.appending(path: "schous-summary-\(getpid()).md")
+    defer { try? FileManager.default.removeItem(at: out) }
+
+    // 1. Normal strøm: tekst = summen av content, aldri thinking; fila skrives.
+    var s = summarize(port: 11501, response: http(200, [thinking, content, done]), out: out)
+    check(s.text == "hei", "strøm: \(s.text.debugDescription)")
+    check(s.state == .done(out), "strøm-state: \(s.state)")
+    check((try? String(contentsOf: out, encoding: .utf8)) == "hei", "fila ble ikke skrevet")
+
+    // 2. Tomt svar er sin egen feil — ikke «ollama nede». Det var feilslutningen
+    //    målingen i #30 selv gjorde først.
+    s = summarize(port: 11502, response: http(200, [done]), out: out)
+    check({ if case .failed(let m) = s.state { return m.contains("svarte tomt") }; return false }(),
+          "tomt svar: \(s.state)")
+
+    // 3. Ukjent modell: 404 med ollamas egen feiltekst, og rådet er `ollama pull`.
+    s = summarize(port: 11503, response: http(404, [#"{"error":"model 'finnes-ikke:1b' not found"}"#]), out: out)
+    check({ if case .failed(let m) = s.state { return m.contains("ollama pull") }; return false }(),
+          "404: \(s.state)")
+
+    // 4. Ingen server: forbindelse nektet, rådet er `ollama serve`.
+    s = summarize(port: 11504, response: nil, out: out)
+    check({ if case .failed(let m) = s.state { return m.contains("ollama serve") }; return false }(),
+          "nektet: \(s.state)")
+
+    // 5. Fristen. Serveren sender én bit og tier. Begge sjekkene trengs:
+    //    meldingen alene er grønn på en frist som aldri drepte noe, bare
+    //    tidssjekken avslører at kallet fikk stå — se «Sjekkene i
+    //    Innstillinger har en frist».
+    let t0 = Date()
+    s = summarize(port: 11505, response: http(200, [content]) , hold: 10, out: out, timeout: 1)
+    let elapsed = Date().timeIntervalSince(t0)
+    check({ if case .failed(let m) = s.state { return m.contains("Ingen svar på 1 s") }; return false }(),
+          "frist: \(s.state)")
+    check(elapsed < 4, "frist brukte \(elapsed) s — utløste ikke")
+}
+
+/// Rå HTTP-respons for nc. NDJSON-linjer, `\n`-terminert som ollama gjør.
+private func http(_ status: Int, _ lines: [String]) -> String {
+    let body = lines.joined(separator: "\n") + "\n"
+    return "HTTP/1.1 \(status) OK\r\nContent-Type: application/x-ndjson\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
+}
+
+/// Starter `nc -l` med `response` (nil = ingen server), kjører Summarizer mot
+/// den og pumper RunLoop til den konkluderer. `hold` = sekunder nc lever
+/// videre etter å ha skrevet, uten å lukke — det er slik en modell som henger
+/// ser ut fra utsiden.
+@MainActor
+private func summarize(port: Int, response: String?, hold: Int = 0, out: URL,
+                       timeout: TimeInterval = 10) -> Summarizer {
+    var server: Process?
+    if let response {
+        // Content-Length settes med vilje *høyere* enn body når vi holder:
+        // ellers ser URLSession en komplett respons og fristen har ingenting
+        // å vente på.
+        let padded = hold > 0
+            ? response.replacingOccurrences(of: "Content-Length: ", with: "Content-Length: 9")
+            : response
+        let script = "printf '%s' \"$1\" ; sleep \(hold)"
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", "(\(script)) | /usr/bin/nc -l 127.0.0.1 \(port)", "sh", padded]
+        // nc echoes what it receives (the HTTP request) to its own stdout;
+        // unredirected that would spam a passing selfcheck with request dumps.
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        try! p.run()
+        server = p
+        // nc trenger et øyeblikk på å lytte. Poll i stedet for å gjette.
+        let until = Date().addingTimeInterval(3)
+        while Date() < until, !listening(port) { usleep(20_000) }
+    }
+    let s = Summarizer(timeout: timeout)
+    s.run(prompt: "p", model: "m", baseURL: URL(string: "http://127.0.0.1:\(port)")!, writeTo: [out])
+    let deadline = Date().addingTimeInterval(timeout + 8)
+    while s.state == .running || s.state == .idle, Date() < deadline {
+        RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+    }
+    server?.terminate()
+    return s
+}
+
+/// `nc -z` would work as a probe too, but it completes a real TCP handshake —
+/// against `nc -l` (no `-k`, one connection only) that handshake *is* the
+/// one connection, so the harness's own poll steals the accept before the
+/// real request ever gets one. Measured: with `nc -z` polling, `curl` right
+/// after gets `Connection refused`. `lsof` inspects listen state without
+/// connecting.
+private func listening(_ port: Int) -> Bool {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+    p.arguments = ["-nP", "-iTCP:\(port)", "-sTCP:LISTEN"]
+    p.standardOutput = FileHandle.nullDevice
+    p.standardError = FileHandle.nullDevice
+    try? p.run(); p.waitUntilExit()
+    return p.terminationStatus == 0
 }
 
 private func check(_ ok: Bool, _ msg: @autoclosure () -> String) {

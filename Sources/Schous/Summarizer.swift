@@ -84,3 +84,160 @@ enum Templates {
         name.lowercased().replacingOccurrences(of: " ", with: "-")
     }
 }
+
+/// Ett kall mot ollama, strømmet. Teksten som vokser er fremdriften.
+@MainActor
+final class Summarizer: ObservableObject {
+    enum State: Equatable { case idle, running, done(URL), failed(String) }
+
+    @Published var text = ""
+    @Published var state: State = .idle
+    @Published var started: Date?
+
+    /// Én linje fra strømmen. `thinking` leses ikke: det er ikke referat.
+    struct Chunk: Equatable {
+        let content: String
+        let done: Bool
+        let promptEvalCount: Int?
+    }
+    private struct Line: Decodable {
+        struct Message: Decodable { var content: String? }
+        var message: Message?
+        var done: Bool?
+        var prompt_eval_count: Int?
+        var error: String?
+    }
+
+    static func parse(_ line: String) -> Chunk? {
+        guard let data = line.data(using: .utf8),
+              let l = try? JSONDecoder().decode(Line.self, from: data) else { return nil }
+        return Chunk(content: l.message?.content ?? "", done: l.done ?? false,
+                     promptEvalCount: l.prompt_eval_count)
+    }
+
+    private let session: URLSession
+    private let timeout: TimeInterval
+    private var task: Task<Void, Never>?
+
+    /// `timeoutIntervalForRequest` er stillhet *mellom* to datapakker, ikke
+    /// total tid. Et to timers møte får ta tiden det tar; en modell i
+    /// tenkesløyfe (gemma4:12b, målt > 900 s i #32) stoppes etter 120 s uten
+    /// et eneste token. Injiserbar så selfcheck kan se den utløse på 1 s.
+    init(timeout: TimeInterval = 120) {
+        self.timeout = timeout
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.timeoutIntervalForRequest = timeout
+        cfg.timeoutIntervalForResource = .infinity
+        session = URLSession(configuration: cfg)
+    }
+
+    func run(prompt: String, model: String, baseURL: URL, writeTo: [URL]) {
+        cancel()
+        text = ""
+        state = .running
+        started = Date()
+        task = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.stream(prompt: prompt, model: model, baseURL: baseURL)
+                guard !self.text.isEmpty else {
+                    self.state = .failed("Modellen svarte tomt. Den brukte trolig hele "
+                        + "budsjettet på tenking; prøv en annen modell.")
+                    return
+                }
+                try self.write(to: writeTo)
+                self.state = .done(writeTo[0])
+            } catch is CancellationError {
+                self.state = .idle
+            } catch let e as URLError where e.code == .cancelled {
+                self.state = .idle
+            } catch let e as URLError where e.code == .cannotConnectToHost {
+                self.state = .failed("ollama svarer ikke på \(baseURL.absoluteString) — kjør `ollama serve`.")
+            } catch let e as URLError where e.code == .timedOut {
+                self.state = .failed("Ingen svar på \(Int(self.timeout)) s — modellen henger, "
+                    + "eller maskinen er full. Kjøringen er stoppet.")
+            } catch {
+                self.state = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    func cancel() {
+        task?.cancel()
+        task = nil
+    }
+
+    private struct HTTPError: Error, LocalizedError {
+        let status: Int, body: String
+        var errorDescription: String? { "ollama svarte \(status): \(body)" }
+    }
+
+    private func stream(prompt: String, model: String, baseURL: URL) async throws {
+        var req = URLRequest(url: baseURL.appending(path: "api/chat"))
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // think: false alltid. Målt 2026-09-04 (ollama 0.33.3): en modell uten
+        // thinking-kapabilitet svarer 200 på feltet, så ingen retry-gren.
+        // Med think på gikk hele budsjettet til tenking og svaret kom tomt (#30).
+        let body: [String: Any] = [
+            "model": model, "stream": true, "think": false,
+            "messages": [["role": "user", "content": prompt]],
+        ]
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (bytes, response) = try await session.bytes(for: req)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 200 else {
+            var err = ""
+            for try await line in bytes.lines { err += line }
+            let msg = (try? JSONDecoder().decode(Line.self, from: Data(err.utf8)))?.error ?? err
+            if status == 404 || msg.contains("not found") {
+                throw NotFoundError(model: model)
+            }
+            throw HTTPError(status: status, body: msg)
+        }
+        for try await line in bytes.lines {
+            guard let chunk = Self.parse(line) else { continue }
+            text += chunk.content
+            if chunk.done {
+                if let n = chunk.promptEvalCount { NSLog("Schous referat: prompt_eval_count=%d", n) }
+                return
+            }
+        }
+    }
+
+    private func write(to urls: [URL]) throws {
+        for url in urls {
+            do { try text.write(to: url, atomically: true, encoding: .utf8) }
+            catch {
+                throw WriteError(url: url, underlying: error)
+            }
+        }
+    }
+    private struct WriteError: Error, LocalizedError {
+        let url: URL, underlying: Error
+        var errorDescription: String? {
+            "Klarte ikke å skrive \(url.lastPathComponent): \(underlying.localizedDescription). "
+            + "Filene kan være delvis oppdatert."
+        }
+    }
+    private struct NotFoundError: Error, LocalizedError {
+        let model: String
+        var errorDescription: String? { "Modellen \(model) finnes ikke — `ollama pull \(model)`." }
+    }
+}
+
+enum Ollama {
+    private struct Tags: Decodable { struct M: Decodable { let name: String }; let models: [M] }
+
+    /// Modellene ollama har. nil = svarer ikke (5 s frist). Kort frist: dette
+    /// kjøres når Innstillinger og editoren åpnes, ikke i bakgrunnen.
+    static func models(baseURL: URL) async -> [String]? {
+        var req = URLRequest(url: baseURL.appending(path: "api/tags"))
+        req.timeoutInterval = 5
+        guard let (data, resp) = try? await URLSession.shared.data(for: req),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let tags = try? JSONDecoder().decode(Tags.self, from: data) else { return nil }
+        return tags.models.map(\.name).sorted()
+    }
+}
