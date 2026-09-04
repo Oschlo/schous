@@ -102,9 +102,12 @@ private struct MenuBarContent: View {
         if recorder.isRecording {
             // Nivået mens det pågår. Et dødt spor oppdaget etter at møtet er
             // over er en obduksjon; dette er tidsnok til å gjøre noe.
+            // Blokktegnene er for øyet; VoiceOver får tallet.
             Text("System   \(meter(recorder.systemLevel))")
+                .accessibilityLabel("Systemlyd \(Int(recorder.systemLevel * 100)) prosent")
             if recorder.inputLabel != nil {
                 Text("Mikrofon \(meter(recorder.micLevel))")
+                    .accessibilityLabel("Mikrofon \(Int(recorder.micLevel * 100)) prosent")
             }
         }
         if let mic = recorder.inputLabel {

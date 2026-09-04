@@ -391,7 +391,7 @@ struct JobProgressView: View {
                 ProgressView().controlSize(.small)
             }
         } else {
-            Image(systemName: "circle").foregroundStyle(.tertiary)
+            Image(systemName: "circle").foregroundStyle(.secondary)
         }
     }
 
