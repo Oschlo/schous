@@ -114,18 +114,22 @@ struct SpeakerEditorView: View {
                 transcript
             }
         }
+        // Fyller alltid. Uten dette sto begge kolonnene forskjøvet oppover i
+        // det referatet startet (tom tekst) og i det det ble ferdig (bytte
+        // Text → MarkdownView) — målt 2026-09-04.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .frame(minWidth: 340)
         // Talere er egenskaper ved innholdet, ikke navigasjon — altså en
         // inspektør, med systemets egen kant, bredde og av/på-knapp.
         .inspector(isPresented: showInspector) {
             inspector.inspectorColumnWidth(min: 240, ideal: 300, max: 420)
         }
-        // Måles *utenfor* .inspector, altså hele vinduet. Innenfor ville den
-        // målt dokumentkolonnen: 900 pt vindu med 300 pt inspektør gir 600,
-        // inspektøren skjules, kolonnen blir 900, inspektøren vises — i sløyfe.
-        .background(GeometryReader { g in
-            Color.clear.onChange(of: g.size.width, initial: true) { _, w in narrow = w < 760 }
-        })
+        // Vinduets bredde, ikke kolonnens: 900 pt vindu med 300 pt inspektør
+        // gir en kolonne på 600, og en måling der ville skjult inspektøren,
+        // fått kolonnen til 900, vist den igjen — i sløyfe. Lest fra NSWindow
+        // via en tom AppKit-visning, ikke en GeometryReader: den skrev
+        // tilstand midt i layout.
+        .background(WindowWidthReader { narrow = $0 < 760 })
         .toolbar {
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 6) {
@@ -157,13 +161,13 @@ struct SpeakerEditorView: View {
                     .disabled(narrow)
             }
             ToolbarItem(placement: .primaryAction) {
-                if pane == .summary, hasSummary {
-                    Button("Kopier referat", systemImage: "doc.on.doc") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(summarizer.text, forType: .string)
-                    }
-                    .help("Kopierer referatet som Markdown")
+                // Alltid til stede, ikke betinget: en verktøylinje som får et
+                // nytt element midt i en kjøring legges ut på nytt.
+                Button("Kopier referat", systemImage: "doc.on.doc") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(summarizer.text, forType: .string)
                 }
+                .help("Kopierer referatet som Markdown")
             }
             ToolbarItemGroup(placement: .primaryAction) {
                 // Delt knapp: klikk skriver standardformatene fra Innstillinger,
@@ -370,6 +374,42 @@ struct SpeakerEditorView: View {
                           < (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate ?? .distantPast) ?? .distantPast }),
            let text = try? String(contentsOf: prior, encoding: .utf8) {
             summarizer.text = text
+        }
+    }
+}
+
+/// Rapporterer bredden på vinduet visningen ligger i, ved innsetting og ved
+/// hver endring av størrelse. Null i utstrekning, utenfor SwiftUI-layouten.
+private struct WindowWidthReader: NSViewRepresentable {
+    let onWidth: (CGFloat) -> Void
+
+    func makeNSView(context: Context) -> Probe { Probe(onWidth: onWidth) }
+    func updateNSView(_ view: Probe, context: Context) { view.onWidth = onWidth }
+
+    final class Probe: NSView {
+        var onWidth: (CGFloat) -> Void
+        init(onWidth: @escaping (CGFloat) -> Void) {
+            self.onWidth = onWidth
+            super.init(frame: .zero)
+        }
+        required init?(coder: NSCoder) { nil }
+        // Selector, ikke blokk: en selector-observer fjernes selv når visningen
+        // dør, så det trengs verken token eller deinit.
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            NotificationCenter.default.removeObserver(self)
+            guard let window else { return }
+            NotificationCenter.default.addObserver(self, selector: #selector(resized(_:)),
+                                                   name: NSWindow.didResizeNotification, object: window)
+            report(window.frame.width)
+        }
+        @objc private func resized(_ n: Notification) {
+            if let w = (n.object as? NSWindow)?.frame.width { report(w) }
+        }
+        /// Utenfor layout-runden: dette kalles fra viewDidMoveToWindow, som
+        /// er midt i den.
+        private func report(_ width: CGFloat) {
+            DispatchQueue.main.async { [weak self] in self?.onWidth(width) }
         }
     }
 }

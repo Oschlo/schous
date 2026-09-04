@@ -132,17 +132,25 @@ struct SummaryFooter: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            status
+            // Fast høyde: bunnen ligger utenfor ScrollView-en, og endret den
+            // høyde midt i en kjøring, sto hele vinduets innhold forskjøvet
+            // opp under verktøylinja til neste layout-runde. Bisektert
+            // 2026-09-04: Markdown-byttet, Dock-sprett/annonsering,
+            // knappebyttet, Text(style: .timer) og .link-knappen var det ikke;
+            // med konstant innhold i bunnen forsvant feilen.
+            VStack(alignment: .leading, spacing: 4) { status }
+                .frame(height: 64, alignment: .topLeading)
+                .clipped()
             HStack {
                 Spacer()
-                if summarizer.state == .running {
-                    Button("Stopp") { summarizer.cancel() }
-                } else {
-                    Button("Lag referat", action: start)
-                        .buttonStyle(.borderedProminent)
-                        .keyboardShortcut("r", modifiers: [.command, .shift])
-                        .disabled(!canStart)
-                }
+                // Begge knappene står alltid; et bytte midt i kjøringen var en
+                // av kandidatene i bisekten over, og en fast bunn er roligere.
+                Button("Stopp") { summarizer.cancel() }
+                    .disabled(summarizer.state != .running)
+                Button("Lag referat", action: start)
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut("r", modifiers: [.command, .shift])
+                    .disabled(!canStart || summarizer.state == .running)
             }
         }
         // Et referat tar minutter; Dock-ikonet sier fra når det er ferdig,
@@ -173,9 +181,18 @@ struct SummaryFooter: View {
                     .font(.callout).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             default:
+                // TimelineView og vanlig tekst, ikke Text(style: .timer): den
+                // selvoppdaterende teksten satt inn og fjernet utenfor et
+                // ScrollView forskjøv hele vinduets innhold opp under
+                // verktøylinja til neste layout-runde. Bisektert 2026-09-04:
+                // Markdown-byttet, Dock-sprett/annonsering og knappebyttet
+                // var det ikke; uten statusvisningen forsvant feilen.
                 if let t0 = summarizer.started {
-                    (Text("Skriver referat … ") + Text(t0, style: .timer))
-                        .font(.callout).foregroundStyle(.secondary)
+                    TimelineView(.periodic(from: t0, by: 1)) { ctx in
+                        let s = Int(ctx.date.timeIntervalSince(t0))
+                        Text("Skriver referat … \(s / 60):\(String(format: "%02d", s % 60))")
+                            .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+                    }
                 }
             }
         case .done(let url):

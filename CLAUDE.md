@@ -673,9 +673,22 @@ om vinduet. Det som ser vilkårlig ut i koden, og ikke er det:
 - **Eksportstatusen står under arbeidsflyt-linja, ikke i verktøylinja.** Målt
   2026-09-04 ved 900 pt: med «Lagret TXT som «klipp-a» i Møtereferater» som
   `ToolbarItem(.status)` ved siden av søkefeltet fløt hele verktøylinja over i
-  «»», og innholdet under sto forskjøvet oppover til første token kom. Med
-  statusen som egen rad, og uten `.animation(value: hasSummary)` på
-  dokumentkolonnen, forsvant begge deler.
+  «»».
+- **Bunnen i inspektøren har fast høyde, og det er ikke pynt.** Endret
+  `SummaryFooter` høyde midt i en kjøring — statusen som kom ved start, og
+  «Referat lagret som …» + «Vis i Finder» ved slutt — sto *hele* vinduets
+  innhold, begge kolonner, forskjøvet opp under verktøylinja til neste
+  layout-runde. Under strømmingen så alt riktig ut, fordi hver tekstpakke er
+  en layout-runde; etter ferdig sto det slik til noen rørte vinduet.
+  Bisektert 2026-09-04 med ett referat per kandidat (ministral-3, klipp på
+  60 s): GeometryReader-bakgrunnen, en betinget knapp i verktøylinja,
+  `.animation(value: hasSummary)`, byttet Text → MarkdownView, Dock-sprett og
+  VoiceOver-annonsering, knappebyttet Stopp ↔ Lag referat,
+  `Text(style: .timer)` og `.link`-knappen — alle fjernet én og én, feilen
+  sto. Med konstant innhold i bunnen forsvant den; med `.frame(height:)` rundt
+  statusen er den borte med alt det andre på plass. Bredden leses av
+  `WindowWidthReader` (AppKit-observasjon på NSWindow) — den erstattet
+  GeometryReaderen underveis og ble stående fordi den er utenfor layouten.
 - **`outputPath` eies av `AppSettings`.** Innstillinger → Generelt viser den,
   så den kunne ikke bo som `@State` i `ContentView` lenger.
 - **Innstillinger er en `TabView` uten fast høyde.** macOS setter tittelen
