@@ -72,8 +72,10 @@ struct SpeakerEditorView: View {
             ToolbarItem(placement: .navigation) {
                 // Det knappen alltid har gjort: tilbake til oppsettet, med fila
                 // fortsatt valgt. «Ny fil» var feil navn på det.
+                // ⌘↑ som Finders «Overordnet mappe», ikke ⌘[: «[» er ⌥8 på
+                // norsk tastatur, og målt her nådde ⌘⌥8 aldri knappen.
                 Button("Tilbake", systemImage: "chevron.left", action: onNewJob)
-                    .keyboardShortcut("[")
+                    .keyboardShortcut(.upArrow)
             }
             ToolbarItem(placement: .status) {
                 if let status {
@@ -89,8 +91,10 @@ struct SpeakerEditorView: View {
                 }
             }
             ToolbarItem(placement: .primaryAction) {
+                // ⌘⌥T, ikke ⌘⌥]: «]» er ⌥9 på norsk tastatur, så den
+                // kombinasjonen finnes ikke der.
                 Button("Talere", systemImage: "sidebar.trailing") { showSpeakers.toggle() }
-                    .keyboardShortcut("]", modifiers: [.command, .option])
+                    .keyboardShortcut("t", modifiers: [.command, .option])
                     .help("Vis eller skjul talere og referat")
             }
             ToolbarItemGroup(placement: .primaryAction) {

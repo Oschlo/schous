@@ -668,6 +668,9 @@ limitation, not a UI nicety. `root()` follows merge chains with a hop limit;
   image from display», og et syntetisk `key code` når ikke Carbon-hurtigtasten.
   Menyene i menylinja *kan* leses, så en test som kun ser på dem står grønn.
   Sjekk låsen før du bisekterer en «vinduet forsvant»-regresjon.
+- **`[` og `]` er ⌥8 og ⌥9 på norsk tastatur.** ⌘[ for «Tilbake» nådde aldri
+  knappen her — målt med ⌘⌥8 via System Events, tittelen sto. Derfor ⌘↑ og
+  ⌘⌥T, ikke ⌘[ og ⌘⌥], uansett hva Finder gjør.
 - **`prosess-status: S` beviser ingenting.** En app som står og venter på en
   TCC-dialog ser ut som en app som kjører helt fint. Det gjelder `codesign` i
   `bundle.sh` også, som venter på nøkkelringen. Dialogen
