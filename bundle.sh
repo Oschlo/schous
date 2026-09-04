@@ -33,6 +33,10 @@ fi
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp Resources/MenuBarIcon.png "$APP/Contents/Resources/MenuBarIcon.png"
 
+# Seedmalene for referat. Kopieres til ~/Library/Application Support/Schous/templates/
+# første gang appen trenger dem — og bare hvis den mappa ikke finnes.
+cp -R Resources/templates "$APP/Contents/Resources/templates"
+
 # Signering med den lokale «Schous Dev»-identiteten når den finnes, ellers ad-hoc.
 #
 # Dette er ikke pynt. Ad-hoc-signatur gir `designated => cdhash H"…"`, som endrer

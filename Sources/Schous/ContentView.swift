@@ -136,6 +136,10 @@ struct ContentView: View {
                 Text(job.detail.isEmpty ? " " : job.detail)
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             default:
+                if let input, TranscriptionJob.finishedOutput(for: input) != nil {
+                    Label("Denne fila er transkribert tidligere.", systemImage: "checkmark.circle")
+                        .foregroundStyle(.secondary).font(.callout)
+                }
                 if !settings.isConfigured {
                     Label("Backend er ikke satt opp — åpne Innstillinger (⌘,)",
                           systemImage: "gearshape")
@@ -160,6 +164,9 @@ struct ContentView: View {
                 Button("Stopp") { job.stop() }
                     .help("Skriver det som er ferdig. En ny start fortsetter der den slapp.")
             } else {
+                if let input, TranscriptionJob.finishedOutput(for: input) != nil {
+                    Button("Åpne resultat") { job.loadFinished(input: input) }
+                }
                 Button("Start transkribering") { start() }
                     .buttonStyle(.borderedProminent)
                     .disabled(input == nil || !settings.isConfigured)

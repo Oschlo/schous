@@ -12,6 +12,12 @@ struct SpeakerEditorView: View {
     @State private var status: String?
     @State private var failed = false
 
+    @StateObject private var summarizer = Summarizer()
+    enum Pane: String, CaseIterable { case transcript = "Transkripsjon", summary = "Referat" }
+    @State private var pane: Pane = .transcript
+    /// Referat-fanen finnes bare når det er noe å vise i den.
+    private var hasSummary: Bool { !summarizer.text.isEmpty || summarizer.state == .running }
+
     /// Alle taler-ID-er backend fant, i rekkefølgen de først dukker opp.
     private var ids: [String] {
         var seen = Set<String>()
@@ -37,17 +43,36 @@ struct SpeakerEditorView: View {
 
     var body: some View {
         HSplitView {
-            transcript
+            VStack(spacing: 0) {
+                if hasSummary {
+                    Picker("", selection: $pane) {
+                        ForEach(Pane.allCases, id: \.self) { Text($0.rawValue) }
+                    }
+                    .pickerStyle(.segmented).labelsHidden()
+                    .padding(8)
+                    Divider()
+                }
+                if pane == .summary, hasSummary {
+                    SummaryPanel(summarizer: summarizer)
+                } else {
+                    transcript
+                }
+            }
+            .frame(minWidth: 340)
             sidebar
         }
         .toolbar {
+            ToolbarItem(placement: .navigation) {
+                // Det knappen alltid har gjort: tilbake til oppsettet, med fila
+                // fortsatt valgt. «Ny fil» var feil navn på det.
+                Button("Tilbake", systemImage: "chevron.left", action: onNewJob)
+            }
             ToolbarItem(placement: .status) {
                 if let status {
                     Text(status).font(.callout).foregroundStyle(failed ? .red : .secondary)
                 }
             }
             ToolbarItemGroup(placement: .primaryAction) {
-                Button("Ny fil", action: onNewJob)
                 // Delt knapp: klikk lagrer standardformatene fra Innstillinger,
                 // pilen skriver ett enkelt format uten å endre standarden.
                 Menu("Lagre") {
@@ -63,6 +88,14 @@ struct SpeakerEditorView: View {
             }
         }
         .onAppear(perform: loadMapping)
+        .navigationTitle(job.base)
+        // Når kjøringen starter er referatet det du venter på — vis det.
+        .onChange(of: summarizer.state) { _, new in
+            if new == .running { pane = .summary }
+        }
+        // «Tilbake» tar med seg Stopp-knappen. Uten dette holdt Task-en
+        // Summarizer i live, og referatet ble skrevet etter at du hadde gått.
+        .onDisappear { summarizer.cancel() }
     }
 
     private var transcript: some View {
@@ -84,7 +117,6 @@ struct SpeakerEditorView: View {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(minWidth: 340)
     }
 
     private var sidebar: some View {
@@ -121,6 +153,8 @@ struct SpeakerEditorView: View {
                     }
                     Divider()
                 }
+
+                SummaryControls(jobDir: job.jobDir, summarizer: summarizer, onStart: startSummary)
             }
             .padding(16)
         }
@@ -178,6 +212,30 @@ struct SpeakerEditorView: View {
         }
     }
 
+    // MARK: - Referat
+
+    /// Lagrer først: navnene fryses nå uansett, så dette er punktet TXT/SRT
+    /// skal ut. Feiler lagringen, startes ikke referatet. Endrer du et navn
+    /// etterpå, er det en ny kjøring.
+    private func startSummary(template: URL, model: String, language: SummaryLanguage, context: String) {
+        save(AppSettings.shared.formats)
+        guard !failed else { return }
+        guard let body = try? String(contentsOf: template, encoding: .utf8) else {
+            failed = true; status = "Kunne ikke lese \(template.lastPathComponent)."; return
+        }
+        let settings = AppSettings.shared
+        let prompt = Summary.prompt(body, language: language.promptValue, context: context,
+                                    transcript: transcriptText(job.segments, names: resolved),
+                                    using: settings.summaryPrompt)
+        let slug = Templates.slug(Templates.name(template))
+        var targets = [outputDir.appending(path: "\(job.base).\(slug).md")]
+        if let dir = job.jobDir {
+            targets.append(dir.appending(path: "summary.\(slug).md"))
+            try? context.write(to: dir.appending(path: "context.txt"), atomically: true, encoding: .utf8)
+        }
+        summarizer.run(prompt: prompt, model: model, baseURL: settings.ollamaBaseURL, writeTo: targets)
+    }
+
     private var mappingURL: URL? { job.jobDir?.appending(path: "speakers.json") }
 
     private func saveMapping() {
@@ -187,10 +245,21 @@ struct SpeakerEditorView: View {
     }
 
     private func loadMapping() {
-        guard let url = mappingURL, let data = try? Data(contentsOf: url),
-              let payload = try? JSONDecoder().decode([String: [String: String]].self, from: data)
-        else { return }
-        names = payload["names"] ?? [:]
-        mergedInto = payload["mergedInto"] ?? [:]
+        if let url = mappingURL, let data = try? Data(contentsOf: url),
+           let payload = try? JSONDecoder().decode([String: [String: String]].self, from: data) {
+            names = payload["names"] ?? [:]
+            mergedInto = payload["mergedInto"] ?? [:]
+        }
+
+        // Et tidligere referat fra denne jobben vises igjen. Nyeste hvis flere.
+        if let dir = job.jobDir,
+           let prior = ((try? FileManager.default.contentsOfDirectory(
+                at: dir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [])
+                .filter({ $0.lastPathComponent.hasPrefix("summary.") && $0.pathExtension == "md" })
+                .max(by: { (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate ?? .distantPast) ?? .distantPast
+                          < (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate ?? .distantPast) ?? .distantPast }),
+           let text = try? String(contentsOf: prior, encoding: .utf8) {
+            summarizer.text = text
+        }
     }
 }

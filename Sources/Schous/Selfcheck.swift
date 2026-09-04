@@ -1,4 +1,5 @@
 import AVFoundation
+import Combine
 import Foundation
 
 /// `Schous --selfcheck` — verifiserer at parserne matcher ekte backend-output.
@@ -8,6 +9,8 @@ func runSelfcheckAndExit() -> Never {
     segmentSelfcheck()
     recorderSelfcheck()
     updateSelfcheck()
+    summarizerSelfcheck()
+    summarizerNetworkSelfcheck()
 
     let job = TranscriptionJob()
 
@@ -154,6 +157,31 @@ func runSelfcheckAndExit() -> Never {
 
     let txt = try! String(contentsOf: dir.appending(path: "t.txt"), encoding: .utf8)
     check(txt == "[00:00:04] Hans Martin (sv): Hei.\n", "txt: \(txt.debugDescription)")
+
+    // Prompten til referatet bruker samme rendering som TXT-eksporten. Én
+    // funksjon, ellers driver de fra hverandre uten at noen merker det.
+    check(transcriptText(segs, names: ["SPEAKER_00": "Hans Martin"]) == txt,
+          "transcriptText avviker fra txt-eksporten")
+
+    // «Åpne resultat»: ferdig output i jobbmappa uten partial-fil = kan lastes
+    // uten å transkribere på nytt. Med partial-fil er forrige kjøring ikke
+    // ferdig, og da skal Start få gjenoppta den.
+    let fakeInput = dir.appending(path: "selfcheck-input.m4a")
+    let fakeJob = TranscriptionJob.jobDirectory(for: fakeInput)
+    try! FileManager.default.createDirectory(at: fakeJob.appending(path: "output"), withIntermediateDirectories: true)
+    try! FileManager.default.createDirectory(at: fakeJob.appending(path: "work"), withIntermediateDirectories: true)
+    check(TranscriptionJob.finishedOutput(for: fakeInput) == nil, "ingen output skal gi nil")
+    try! JSONEncoder().encode(segs).write(to: fakeJob.appending(path: "output/selfcheck-input.json"))
+    check(TranscriptionJob.finishedOutput(for: fakeInput) != nil, "ferdig output ble ikke funnet")
+    try! Data().write(to: fakeJob.appending(path: "work/selfcheck-input.partial.jsonl"))
+    check(TranscriptionJob.finishedOutput(for: fakeInput) == nil, "partial-fil skal bety ikke ferdig")
+    try! FileManager.default.removeItem(at: fakeJob.appending(path: "work/selfcheck-input.partial.jsonl"))
+    let loaded = TranscriptionJob()
+    loaded.loadFinished(input: fakeInput)
+    check(loaded.state == .done && loaded.segments.count == 1 && loaded.base == "selfcheck-input",
+          "loadFinished: \(loaded.state) \(loaded.segments.count) \(loaded.base)")
+    try? FileManager.default.removeItem(at: fakeJob)
+
     let srt = try! String(contentsOf: dir.appending(path: "t.srt"), encoding: .utf8)
     check(srt == "1\n00:00:04,216 --> 00:00:07,905\nHans Martin (sv): Hei.\n\n",
           "srt: \(srt.debugDescription)")
@@ -375,6 +403,236 @@ private func mix(_ sources: [(channels: Int, samples: [Float])], capacity: Int =
 infix operator ≈: ComparisonPrecedence
 private func ≈ (a: [Float], b: [Float]) -> Bool {
     a.count == b.count && zip(a, b).allSatisfy { abs($0 - $1) < 1e-6 }
+}
+
+/// Referat: plassholdere, slug og seeding. Selve nettkallet testes i
+/// summarizerNetworkSelfcheck mot en ekte socket.
+@MainActor
+private func summarizerSelfcheck() {
+    // Alle fire byttes, og ingen krøllparentes står igjen — en glemt
+    // plassholder ville gått rett til modellen som tekst.
+    let p = Summary.prompt("MAL", language: "Norwegian", context: "KTX",
+                           transcript: "[00:00:04] A (no): Hei.\n", using: Summary.defaultPrompt)
+    check(p.contains("MAL") && p.contains("Norwegian") && p.contains("KTX")
+          && p.contains("[00:00:04] A (no): Hei.\n"), "prompt mangler en verdi:\n\(p)")
+    check(!p.contains("{") && !p.contains("}"), "plassholder står igjen:\n\(p)")
+    // En verdi som selv inneholder «{transcript}» (mulig i en brukerskrevet
+    // mal) skal ikke skannes på nytt av et senere bytte — kjedede
+    // .replacingOccurrences ville gjort nettopp det.
+    let literal = Summary.prompt("x {transcript} y", language: "English", context: "c",
+                                 transcript: "T", using: Summary.defaultPrompt)
+    check(literal.contains("x {transcript} y"), "substituert innhold ble skannet på nytt:\n\(literal)")
+    // Tom kontekst blir «(none)», ikke en tom linje modellen kan tolke som noe.
+    check(Summary.prompt("m", language: "English", context: "", transcript: "t",
+                         using: Summary.defaultPrompt).contains("(none)"),
+          "tom kontekst skal bli (none)")
+    check(SummaryLanguage.norwegian.promptValue == "Norwegian"
+          && SummaryLanguage.english.promptValue == "English", "språkverdier")
+
+    check(Templates.slug("Customer Call") == "customer-call", "slug: \(Templates.slug("Customer Call"))")
+    check(Templates.slug("Stand-Up") == "stand-up", "slug: \(Templates.slug("Stand-Up"))")
+    check(Templates.slug("Discovery interview") == "discovery-interview", "slug med små bokstaver")
+
+    // Seeding: kopierer bare når mappa ikke finnes. En tom mappe er et valg.
+    let root = URL.temporaryDirectory.appending(path: "schous-templates-\(getpid())")
+    let seeds = root.appending(path: "seeds")
+    try! FileManager.default.createDirectory(at: seeds, withIntermediateDirectories: true)
+    try! "# Stand-Up\n".write(to: seeds.appending(path: "Stand-Up.md"), atomically: true, encoding: .utf8)
+    let dir = root.appending(path: "templates")
+    Templates.seedIfMissing(into: dir, from: seeds)
+    check(Templates.list(in: dir).map(\.lastPathComponent) == ["Stand-Up.md"],
+          "seeding kopierte ikke: \(Templates.list(in: dir))")
+    try! FileManager.default.removeItem(at: dir.appending(path: "Stand-Up.md"))
+    Templates.seedIfMissing(into: dir, from: seeds)
+    check(Templates.list(in: dir).isEmpty, "tom mappe ble seedet på nytt")
+    try? FileManager.default.removeItem(at: root)
+}
+
+/// Referat: NDJSON-parseren mot ordrette ollama-linjer (0.33.3), og klienten
+/// mot en ekte socket via `nc -l`. Stubb i prosess ville ikke bevist at
+/// timeoutIntervalForRequest faktisk utløser.
+@MainActor
+private func summarizerNetworkSelfcheck() {
+    let thinking = #"{"model":"qwen3.8:27b-mlx","created_at":"2026-09-04T09:17:09.179986Z","message":{"role":"assistant","content":"","thinking":"The"},"done":false}"#
+    let content = #"{"model":"qwen3.8:27b-mlx","created_at":"2026-09-04T09:16:35.191059Z","message":{"role":"assistant","content":"hei"},"done":false}"#
+    let done = #"{"model":"qwen3.8:27b-mlx","created_at":"2026-09-04T09:16:35.31501Z","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","total_duration":7144189292,"load_duration":6040992125,"prompt_eval_count":16,"prompt_eval_cached_count":0,"prompt_eval_duration":683572250,"eval_count":1,"eval_duration":417508667}"#
+
+    // Tenking er ikke tekst. Slipper den inn, står modellens grubling i referatet.
+    let t = Summarizer.parse(thinking)
+    check(t?.content == "" && t?.done == false, "thinking-bit: \(String(describing: t))")
+    let c = Summarizer.parse(content)
+    check(c?.content == "hei" && c?.done == false, "content-bit: \(String(describing: c))")
+    let d = Summarizer.parse(done)
+    check(d?.done == true && d?.promptEvalCount == 16, "sluttobjekt: \(String(describing: d))")
+    check(Summarizer.parse("ikke json") == nil, "støy skal gi nil, ikke krasj")
+
+    // Klienten mot en ekte prosess. Én forbindelse per nc; hvert tilfelle får
+    // sin egen port.
+    let out = URL.temporaryDirectory.appending(path: "schous-summary-\(getpid()).md")
+    defer { try? FileManager.default.removeItem(at: out) }
+
+    // 1. Normal strøm: tekst = summen av content, aldri thinking; fila skrives.
+    //    `reqFile` fanger requesten nc faktisk mottok, så think:false verifiseres
+    //    på det som gikk over ledningen, ikke bare det klienten mente å sende.
+    let reqFile = URL.temporaryDirectory.appending(path: "schous-req-\(getpid()).txt")
+    defer { try? FileManager.default.removeItem(at: reqFile) }
+    var s = summarize(port: 11501, response: http(200, [thinking, content, done]), out: out, reqFile: reqFile)
+    check(s.text == "hei", "strøm: \(s.text.debugDescription) state=\(s.state)")
+    check(s.state == .done(out), "strøm-state: \(s.state)")
+    check((try? String(contentsOf: out, encoding: .utf8)) == "hei", "fila ble ikke skrevet")
+    check((try? String(contentsOf: reqFile, encoding: .utf8))?.contains(#""think":false"#) == true,
+          "think:false gikk ikke over ledningen")
+
+    // 2. Tomt svar er sin egen feil — ikke «ollama nede». Det var feilslutningen
+    //    målingen i #30 selv gjorde først.
+    s = summarize(port: 11502, response: http(200, [done]), out: out)
+    check({ if case .failed(let m) = s.state { return m.contains("svarte tomt") }; return false }(),
+          "tomt svar: \(s.state)")
+
+    // 3. Ukjent modell: 404 med ollamas egen feiltekst, og rådet er `ollama pull`.
+    s = summarize(port: 11503, response: http(404, [#"{"error":"model 'finnes-ikke:1b' not found"}"#]), out: out)
+    check({ if case .failed(let m) = s.state { return m.contains("ollama pull") }; return false }(),
+          "404: \(s.state)")
+
+    // 4. Ingen server: forbindelse nektet, rådet er `ollama serve`.
+    s = summarize(port: 11504, response: nil, out: out)
+    check({ if case .failed(let m) = s.state { return m.contains("ollama serve") }; return false }(),
+          "nektet: \(s.state)")
+
+    // 5. Fristen. Serveren sender én bit og tier. Begge sjekkene trengs:
+    //    meldingen alene er grønn på en frist som aldri drepte noe, bare
+    //    tidssjekken avslører at kallet fikk stå — se «Sjekkene i
+    //    Innstillinger har en frist».
+    let t0 = Date()
+    s = summarize(port: 11505, response: http(200, [content]) , hold: 10, out: out, timeout: 1)
+    let elapsed = Date().timeIntervalSince(t0)
+    check({ if case .failed(let m) = s.state { return m.contains("Ingen svar på 1 s") }; return false }(),
+          "frist: \(s.state)")
+    check(elapsed < 4, "frist brukte \(elapsed) s — utløste ikke")
+
+    // 6. Kansellering midt i en strøm: .idle, ingen fil skrevet. Går gjennom
+    //    startServer direkte (ikke summarize) fordi vi må avbryte før den ellers
+    //    ville ventet til done/failed/frist.
+    let outCancel = URL.temporaryDirectory.appending(path: "schous-summary-cancel-\(getpid()).md")
+    defer { try? FileManager.default.removeItem(at: outCancel) }
+    let server6 = startServer(port: 11506, response: http(200, [content]), hold: 10, reqFile: nil)
+    let s6 = Summarizer(timeout: 10)
+    s6.run(prompt: "p", model: "m", baseURL: URL(string: "http://127.0.0.1:11506")!, writeTo: [outCancel])
+    RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+    s6.cancel()
+    // Sjekkes uten å pumpe RunLoop igjen: cancel() skal sette .idle synkront,
+    // ikke overlate det til den kansellerte Task-ens catch-gren, som først får
+    // kjøre neste gang MainActor-køen tømmes.
+    check(s6.state == .idle, "kansellert: \(s6.state)")
+    check(!FileManager.default.fileExists(atPath: outCancel.path), "kansellert skrev likevel fil")
+    // …og etter at den kansellerte Task-en har fått avvikle: fortsatt .idle,
+    // fortsatt ingen fil, og defer-flushen i stream() la ikke rest i `text`.
+    RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+    check(s6.state == .idle, "kansellert, etter avvikling: \(s6.state)")
+    check(!FileManager.default.fileExists(atPath: outCancel.path), "kansellert skrev fil etter avvikling")
+    server6.terminate()
+
+    // 7. Strøm som slutter uten done: nc lukker pent etter én bit. Det er slik
+    //    en runner som dør ser ut utenfra, og det må ikke bli «Referat lagret».
+    try? FileManager.default.removeItem(at: out)
+    s = summarize(port: 11507, response: http(200, [content]), out: out)
+    check({ if case .failed(let m) = s.state { return m.contains("brutt") }; return false }(),
+          "EOF uten done: \(s.state)")
+    check(!FileManager.default.fileExists(atPath: out.path), "EOF uten done skrev fil")
+
+    // 8. Feilen som egen NDJSON-linje midt i en 200-strøm — det ollama gjør
+    //    når runneren dør etter at statuslinja er sendt.
+    s = summarize(port: 11508, response: http(200, [content, #"{"error":"runner process has terminated"}"#]), out: out)
+    check({ if case .failed(let m) = s.state { return m.contains("runner process") }; return false }(),
+          "feil i strøm: \(s.state)")
+    check(!FileManager.default.fileExists(atPath: out.path), "feil i strøm skrev fil")
+
+    // 9. Strupet publisering: 200 linjer i én pakke skal gi en håndfull
+    //    oppdateringer av `text`, ikke 200. Målt 2026-09-04 før strupingen:
+    //    appen brukte ~7 min på 100 % CPU etter at ollama var ferdig, ett
+    //    re-render av hele editoren per linje.
+    var publishes = 0
+    let s9 = Summarizer(timeout: 10)
+    let sub = s9.$text.dropFirst().sink { _ in publishes += 1 }
+    s = summarize(port: 11509, response: http(200, Array(repeating: content, count: 200) + [done]),
+                  out: out, summarizer: s9)
+    check(s.text == String(repeating: "hei", count: 200), "200 linjer: \(s.text.count) tegn")
+    check(publishes < 10, "struping: \(publishes) publiseringer for 200 linjer")
+    sub.cancel()
+}
+
+/// Rå HTTP-respons for nc. NDJSON-linjer, `\n`-terminert som ollama gjør.
+private func http(_ status: Int, _ lines: [String]) -> String {
+    let body = lines.joined(separator: "\n") + "\n"
+    return "HTTP/1.1 \(status) OK\r\nContent-Type: application/x-ndjson\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
+}
+
+/// Starter `nc -l` på `port` som svarer med `response`. `hold` = sekunder nc
+/// lever videre etter å ha skrevet, uten å lukke — det er slik en modell som
+/// henger ser ut fra utsiden. `reqFile`, hvis satt, får requesten nc mottok
+/// (nc ekko-er alt den leser til sin egen stdout); ellers går den til
+/// /dev/null — unredirected ville en grønn kjøring spamme rå HTTP-requester.
+private func startServer(port: Int, response: String, hold: Int, reqFile: URL?) -> Process {
+    // Content-Length settes med vilje *høyere* enn body når vi holder: ellers
+    // ser URLSession en komplett respons og fristen har ingenting å vente på.
+    let padded = hold > 0
+        ? response.replacingOccurrences(of: "Content-Length: ", with: "Content-Length: 9")
+        : response
+    // Uten `hold` lever nc et halvt sekund etter svaret likevel. Lukker den i
+    // det stdin når EOF, ligger requesten ofte ulest i mottaksbufferet, og
+    // close() på en socket med ulest data gir RST, ikke FIN — URLSession
+    // kaster da responsen den alt har fått. Målt 2026-09-04 på M1 Pro med
+    // `sleep 0`: 7/25 runder «The network connection was lost»; curl mot
+    // samme nc ser det ikke (0/30), så testen må kjøres med appens klient.
+    let script = "printf '%s' \"$1\" ; sleep \(hold > 0 ? "\(hold)" : "0.5")"
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/bin/sh")
+    p.arguments = ["-c", "(\(script)) | /usr/bin/nc -l 127.0.0.1 \(port)", "sh", padded]
+    if let reqFile {
+        FileManager.default.createFile(atPath: reqFile.path, contents: nil)
+        p.standardOutput = try? FileHandle(forWritingTo: reqFile)
+    } else {
+        p.standardOutput = FileHandle.nullDevice
+    }
+    p.standardError = FileHandle.nullDevice
+    try! p.run()
+    // nc trenger et øyeblikk på å lytte. Poll i stedet for å gjette.
+    let until = Date().addingTimeInterval(3)
+    while Date() < until, !listening(port) { usleep(20_000) }
+    return p
+}
+
+/// Starter en server via `startServer` (nil `response` = ingen server), kjører
+/// Summarizer mot den og pumper RunLoop til den konkluderer.
+@MainActor
+private func summarize(port: Int, response: String?, hold: Int = 0, out: URL,
+                       timeout: TimeInterval = 10, reqFile: URL? = nil,
+                       summarizer: Summarizer? = nil) -> Summarizer {
+    let server = response.map { startServer(port: port, response: $0, hold: hold, reqFile: reqFile) }
+    let s = summarizer ?? Summarizer(timeout: timeout)
+    s.run(prompt: "p", model: "m", baseURL: URL(string: "http://127.0.0.1:\(port)")!, writeTo: [out])
+    let deadline = Date().addingTimeInterval(timeout + 8)
+    while s.state == .running || s.state == .idle, Date() < deadline {
+        RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+    }
+    server?.terminate()
+    return s
+}
+
+/// `nc -z` would work as a probe too, but it completes a real TCP handshake —
+/// against `nc -l` (no `-k`, one connection only) that handshake *is* the
+/// one connection, so the harness's own poll steals the accept before the
+/// real request ever gets one. Measured: with `nc -z` polling, `curl` right
+/// after gets `Connection refused`. `lsof` inspects listen state without
+/// connecting.
+private func listening(_ port: Int) -> Bool {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+    p.arguments = ["-nP", "-iTCP:\(port)", "-sTCP:LISTEN"]
+    p.standardOutput = FileHandle.nullDevice
+    p.standardError = FileHandle.nullDevice
+    try? p.run(); p.waitUntilExit()
+    return p.terminationStatus == 0
 }
 
 private func check(_ ok: Bool, _ msg: @autoclosure () -> String) {

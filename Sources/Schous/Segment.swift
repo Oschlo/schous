@@ -26,6 +26,14 @@ enum OutputFormat: String, CaseIterable, Identifiable {
     var label: String { rawValue.uppercased() }
 }
 
+/// TXT-linjene, én per segment. `ts(...)[:-4]` i Python kutter ",mmm" → HH:MM:SS.
+/// Delt mellom TXT-eksporten og referat-prompten, så de ikke kan avvike.
+func transcriptText(_ segs: [Segment], names: [String: String] = [:]) -> String {
+    segs.map { s in
+        "[\(String(ts(s.start, ".").dropLast(4)))] \(names[s.speaker] ?? s.speaker) (\(s.language)): \(s.text)"
+    }.joined(separator: "\n") + "\n"
+}
+
 /// Port av write_outputs (transcribe.py:122-130). `names` mapper SPEAKER_00 → visningsnavn.
 /// Skriver formatene i `formats` som <base>.txt / .srt / .json og returnerer stiene.
 /// `formats` er default alle tre, slik backend gjør — selfcheck sammenligner mot den.
@@ -38,11 +46,7 @@ func writeOutputs(_ segs: [Segment], to dir: URL, base: String, names: [String: 
     var written: [URL] = []
 
     if formats.contains(.txt) {
-        // ts(...)[:-4] i Python kutter ",mmm" → HH:MM:SS
-        let txt = segs.map { s in
-            "[\(String(ts(s.start, ".").dropLast(4)))] \(label(s)) (\(s.language)): \(s.text)"
-        }.joined(separator: "\n") + "\n"
-        try txt.write(to: url(.txt), atomically: true, encoding: .utf8)
+        try transcriptText(segs, names: names).write(to: url(.txt), atomically: true, encoding: .utf8)
         written.append(url(.txt))
     }
 
