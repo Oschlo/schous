@@ -452,10 +452,16 @@ private func summarizerNetworkSelfcheck() {
     defer { try? FileManager.default.removeItem(at: out) }
 
     // 1. Normal strøm: tekst = summen av content, aldri thinking; fila skrives.
-    var s = summarize(port: 11501, response: http(200, [thinking, content, done]), out: out)
+    //    `reqFile` fanger requesten nc faktisk mottok, så think:false verifiseres
+    //    på det som gikk over ledningen, ikke bare det klienten mente å sende.
+    let reqFile = URL.temporaryDirectory.appending(path: "schous-req-\(getpid()).txt")
+    defer { try? FileManager.default.removeItem(at: reqFile) }
+    var s = summarize(port: 11501, response: http(200, [thinking, content, done]), out: out, reqFile: reqFile)
     check(s.text == "hei", "strøm: \(s.text.debugDescription)")
     check(s.state == .done(out), "strøm-state: \(s.state)")
     check((try? String(contentsOf: out, encoding: .utf8)) == "hei", "fila ble ikke skrevet")
+    check((try? String(contentsOf: reqFile, encoding: .utf8))?.contains(#""think":false"#) == true,
+          "think:false gikk ikke over ledningen")
 
     // 2. Tomt svar er sin egen feil — ikke «ollama nede». Det var feilslutningen
     //    målingen i #30 selv gjorde først.
@@ -483,6 +489,23 @@ private func summarizerNetworkSelfcheck() {
     check({ if case .failed(let m) = s.state { return m.contains("Ingen svar på 1 s") }; return false }(),
           "frist: \(s.state)")
     check(elapsed < 4, "frist brukte \(elapsed) s — utløste ikke")
+
+    // 6. Kansellering midt i en strøm: .idle, ingen fil skrevet. Går gjennom
+    //    startServer direkte (ikke summarize) fordi vi må avbryte før den ellers
+    //    ville ventet til done/failed/frist.
+    let outCancel = URL.temporaryDirectory.appending(path: "schous-summary-cancel-\(getpid()).md")
+    defer { try? FileManager.default.removeItem(at: outCancel) }
+    let server6 = startServer(port: 11506, response: http(200, [content]), hold: 10, reqFile: nil)
+    let s6 = Summarizer(timeout: 10)
+    s6.run(prompt: "p", model: "m", baseURL: URL(string: "http://127.0.0.1:11506")!, writeTo: [outCancel])
+    RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+    s6.cancel()
+    // Sjekkes uten å pumpe RunLoop igjen: cancel() skal sette .idle synkront,
+    // ikke overlate det til den kansellerte Task-ens catch-gren, som først får
+    // kjøre neste gang MainActor-køen tømmes.
+    check(s6.state == .idle, "kansellert: \(s6.state)")
+    check(!FileManager.default.fileExists(atPath: outCancel.path), "kansellert skrev likevel fil")
+    server6.terminate()
 }
 
 /// Rå HTTP-respons for nc. NDJSON-linjer, `\n`-terminert som ollama gjør.
@@ -491,35 +514,41 @@ private func http(_ status: Int, _ lines: [String]) -> String {
     return "HTTP/1.1 \(status) OK\r\nContent-Type: application/x-ndjson\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
 }
 
-/// Starter `nc -l` med `response` (nil = ingen server), kjører Summarizer mot
-/// den og pumper RunLoop til den konkluderer. `hold` = sekunder nc lever
-/// videre etter å ha skrevet, uten å lukke — det er slik en modell som henger
-/// ser ut fra utsiden.
+/// Starter `nc -l` på `port` som svarer med `response`. `hold` = sekunder nc
+/// lever videre etter å ha skrevet, uten å lukke — det er slik en modell som
+/// henger ser ut fra utsiden. `reqFile`, hvis satt, får requesten nc mottok
+/// (nc ekko-er alt den leser til sin egen stdout); ellers går den til
+/// /dev/null — unredirected ville en grønn kjøring spamme rå HTTP-requester.
+private func startServer(port: Int, response: String, hold: Int, reqFile: URL?) -> Process {
+    // Content-Length settes med vilje *høyere* enn body når vi holder: ellers
+    // ser URLSession en komplett respons og fristen har ingenting å vente på.
+    let padded = hold > 0
+        ? response.replacingOccurrences(of: "Content-Length: ", with: "Content-Length: 9")
+        : response
+    let script = "printf '%s' \"$1\" ; sleep \(hold)"
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/bin/sh")
+    p.arguments = ["-c", "(\(script)) | /usr/bin/nc -l 127.0.0.1 \(port)", "sh", padded]
+    if let reqFile {
+        FileManager.default.createFile(atPath: reqFile.path, contents: nil)
+        p.standardOutput = try? FileHandle(forWritingTo: reqFile)
+    } else {
+        p.standardOutput = FileHandle.nullDevice
+    }
+    p.standardError = FileHandle.nullDevice
+    try! p.run()
+    // nc trenger et øyeblikk på å lytte. Poll i stedet for å gjette.
+    let until = Date().addingTimeInterval(3)
+    while Date() < until, !listening(port) { usleep(20_000) }
+    return p
+}
+
+/// Starter en server via `startServer` (nil `response` = ingen server), kjører
+/// Summarizer mot den og pumper RunLoop til den konkluderer.
 @MainActor
 private func summarize(port: Int, response: String?, hold: Int = 0, out: URL,
-                       timeout: TimeInterval = 10) -> Summarizer {
-    var server: Process?
-    if let response {
-        // Content-Length settes med vilje *høyere* enn body når vi holder:
-        // ellers ser URLSession en komplett respons og fristen har ingenting
-        // å vente på.
-        let padded = hold > 0
-            ? response.replacingOccurrences(of: "Content-Length: ", with: "Content-Length: 9")
-            : response
-        let script = "printf '%s' \"$1\" ; sleep \(hold)"
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/bin/sh")
-        p.arguments = ["-c", "(\(script)) | /usr/bin/nc -l 127.0.0.1 \(port)", "sh", padded]
-        // nc echoes what it receives (the HTTP request) to its own stdout;
-        // unredirected that would spam a passing selfcheck with request dumps.
-        p.standardOutput = FileHandle.nullDevice
-        p.standardError = FileHandle.nullDevice
-        try! p.run()
-        server = p
-        // nc trenger et øyeblikk på å lytte. Poll i stedet for å gjette.
-        let until = Date().addingTimeInterval(3)
-        while Date() < until, !listening(port) { usleep(20_000) }
-    }
+                       timeout: TimeInterval = 10, reqFile: URL? = nil) -> Summarizer {
+    let server = response.map { startServer(port: port, response: $0, hold: hold, reqFile: reqFile) }
     let s = Summarizer(timeout: timeout)
     s.run(prompt: "p", model: "m", baseURL: URL(string: "http://127.0.0.1:\(port)")!, writeTo: [out])
     let deadline = Date().addingTimeInterval(timeout + 8)

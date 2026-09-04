@@ -145,12 +145,13 @@ final class Summarizer: ObservableObject {
                         + "budsjettet på tenking; prøv en annen modell.")
                     return
                 }
+                guard !Task.isCancelled else { return }
                 try self.write(to: writeTo)
                 self.state = .done(writeTo[0])
             } catch is CancellationError {
-                self.state = .idle
+                return
             } catch let e as URLError where e.code == .cancelled {
-                self.state = .idle
+                return
             } catch let e as URLError where e.code == .cannotConnectToHost {
                 self.state = .failed("ollama svarer ikke på \(baseURL.absoluteString) — kjør `ollama serve`.")
             } catch let e as URLError where e.code == .timedOut {
@@ -165,6 +166,7 @@ final class Summarizer: ObservableObject {
     func cancel() {
         task?.cancel()
         task = nil
+        if state == .running { state = .idle }
     }
 
     private struct HTTPError: Error, LocalizedError {
