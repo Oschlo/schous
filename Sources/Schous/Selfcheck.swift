@@ -154,6 +154,12 @@ func runSelfcheckAndExit() -> Never {
 
     let txt = try! String(contentsOf: dir.appending(path: "t.txt"), encoding: .utf8)
     check(txt == "[00:00:04] Hans Martin (sv): Hei.\n", "txt: \(txt.debugDescription)")
+
+    // Prompten til referatet bruker samme rendering som TXT-eksporten. Én
+    // funksjon, ellers driver de fra hverandre uten at noen merker det.
+    check(transcriptText(segs, names: ["SPEAKER_00": "Hans Martin"]) == txt,
+          "transcriptText avviker fra txt-eksporten")
+
     let srt = try! String(contentsOf: dir.appending(path: "t.srt"), encoding: .utf8)
     check(srt == "1\n00:00:04,216 --> 00:00:07,905\nHans Martin (sv): Hei.\n\n",
           "srt: \(srt.debugDescription)")
