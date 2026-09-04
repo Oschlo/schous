@@ -622,6 +622,62 @@ falls back to an SF Symbol. Edit the sprite in `icon.py` and both icons rebuild.
 It runs on the real-time thread, which is why it takes an `AudioBufferList`
 rather than arrays. `--selfcheck` covers it.
 
+## Vinduet: fire tilstander, én inspektør
+
+Designgjennomgangen i [#40](https://github.com/Oschlo/schous/issues/40) la
+om vinduet. Det som ser vilkårlig ut i koden, og ikke er det:
+
+- **`ContentView` velger, `SetupViews.swift` viser.** Tom → `EmptyStateView`,
+  fil valgt → `JobSetupView`, kjører → `JobProgressView`, ferdig →
+  `SpeakerEditorView`. Slipp, Fil-menyen, Dock-sprett og VoiceOver-annonsering
+  ligger i `ContentView` fordi de gjelder alle fire.
+- **Stepperen er ikke en wizard.** `WorkflowStepper` viser hvor du er; bare
+  ferdige og aktive steg kan trykkes, og alt de gjør er å bytte fane eller
+  gå tilbake. Ingen tilstand bor i den.
+- **Inspektøren skjuler seg under 760 pt.** 620 er minimum vindusbredde,
+  inspektøren er minst 240, og under summen klemte to kolonner
+  transkripsjonen. `wantsInspector` er brukerens valg og `narrow` vinduets;
+  bindingen til `.inspector` er OG-en av dem, så et smalt vindu som blir bredt
+  igjen får inspektøren tilbake uten at brukeren må be om den.
+- **Referatets handling er en fast bunn, ikke enden av et scrollfelt.**
+  `SummaryFooter` ligger utenfor `ScrollView`-en i inspektøren. Det var kjernen
+  i #40: «Lag referat» forsvant under folden ved tre talere.
+- **Estimatene er rater fra forrige kjøring** (`Estimates.swift`, #39):
+  sekunder per lydsekund per steg i `stepRates`, og `[lastSek, sekPerTegn]` per
+  modell i `summaryRates`, begge i `UserDefaults`. Lineær tilnærming; teksten
+  sier «ca.» og «vanligvis». Lydlengden kommer fra `AVURLAsset` i
+  `ContentView` og følger `start(input:speakers:audioSeconds:)`; er den 0
+  lagres ingen rate. Steg 4 bruker fortsatt segmenttellingen (`eta`).
+  Referatets rate kommer fra `load_duration` og `prompt_eval_duration` i
+  ollamas sluttobjekt; `Summarizer.estimateStore` er injiserbar så
+  `--selfcheck` ikke rører brukerens tall.
+- **Referatet rendres rått mens det strømmer, pent når det er ferdig**
+  (`Markdown.swift`, #41). Teksten publiseres ti ganger i sekundet, og
+  `MarkdownBlock.parse` per publisering ville gjort CPU-toppen mot slutten
+  (målt 100 %, se «Referat går rett til ollama») verre. Ingen pakke:
+  `AttributedString(markdown:)` tar inline, overskrifter og lister deles ut
+  linje for linje. `<aside>` hoppes over.
+- **Søket er en egen `TextField`, ikke `.searchable`.** Fokus fra ⌘F kan ikke
+  styres programmatisk før macOS 15, og plattformen er 14.2. Vis-menyen poster
+  `.focusSearch`; editoren setter `@FocusState`.
+- **«Lagre» heter «Eksporter», ⌘S står.** Knappen skriver TXT/SRT/JSON til
+  målmappa, og det er eksport. Snarveien er dokumentert og innarbeidet.
+- **Tittelen er `title.txt` i jobbmappa** (#42), ved siden av `context.txt`
+  og `speakers.json`. `outputBase(title:date:fallback:)` i `Segment.swift`
+  gir `2026-09-03 Tittel` eller kildefilas navn; datoen er inputfilas
+  `creationDate`. Bare *navnet* på filene i målmappa endres — innholdet er
+  fortsatt den byte-eksakte porten, og `output/` i jobbmappa røres ikke.
+- **`outputPath` eies av `AppSettings`.** Innstillinger → Generelt viser den,
+  så den kunne ikke bo som `@State` i `ContentView` lenger.
+- **Innstillinger er en `TabView` uten fast høyde.** macOS setter tittelen
+  etter fanen og vinduet følger panelet. Sjekkene låser bare backend-feltet;
+  «Avbryt» dreper prosessen via `register`-parameteren på `capture`, som
+  `--selfcheck` kjører mot `/bin/sleep`.
+- **`modelsCached` er en filsjekk** på de to katalogene `huggingface_hub`
+  lager under `~/.cache/huggingface/hub`. Den er der fordi README kaller
+  nedlastingen første jobbs mest sannsynlige «den henger»; nå sier
+  tomtilstanden og fremdriften det på forhånd.
+
 ## Snarveier, Fil-menyen og hurtigtasten
 
 Fire ting som ser vilkårlige ut i koden og ikke er det:
@@ -638,11 +694,13 @@ Fire ting som ser vilkårlige ut i koden og ikke er det:
   skrev fila og gjorde Schous fremst. Kombinasjonen er fast. `.keyboardShortcut`
   på menyknappen *viser* den bare; en menysnarvei virker kun mens menyen er
   åpen.
-- **Fil-menyen sier fra, den handler ikke.** `.commands` bor på scenen og vet
+- **Menyene sier fra, de handler ikke.** `.commands` bor på scenen og vet
   ikke om vinduet viser oppsettet eller editoren, og `FocusedValue` er mer
-  kode enn det er verdt for to elementer. «Åpne…» og «Lagre» poster derfor
-  `.openFile`/`.saveOutputs`, og visningen som er framme lytter. Prisen: ⌘S
-  utenfor editoren gjør ingenting, stille. Det er kjent og godtatt.
+  kode enn det er verdt for fire elementer. «Åpne…», «Eksporter», «Søk i
+  transkripsjonen» og «Vis eller skjul inspektør» poster derfor
+  `.openFile`/`.saveOutputs`/`.focusSearch`/`.toggleInspector`, og visningen
+  som er framme lytter. Prisen: ⌘S og ⌘F utenfor editoren gjør ingenting,
+  stille. Det er kjent og godtatt.
 - **Dock-spretten har ingen «er appen aktiv»-sjekk med vilje.**
   `requestUserAttention` ignoreres av macOS når appen alt er fremst, så en
   sjekk foran ville bare gjentatt den. Kalles på `.done`, `.stopped` og
