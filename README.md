@@ -7,8 +7,9 @@ Drop in a file — or record system audio straight from the menu bar — pick wh
 the result goes, watch the progress, and name the speakers afterwards. SwiftUI,
 no third-party dependencies, no Xcode.
 
-![The speaker editor: transcript on the left with names applied, speaker list on
-the right where IDs are renamed and merged](docs/speakers.png)
+![The speaker editor: the transcript as a document on the left, with the
+workflow line above it; on the right the inspector's Talere tab, where each
+speaker ID gets a name and a merge menu](docs/speakers.png)
 
 The name comes from Schous plass in Oslo. Since that gives away nothing about
 what the app does, `bundle.sh` puts Spotlight keywords on the bundle — searching
@@ -223,8 +224,9 @@ Dock icon bounces once, and VoiceOver announces it.
 | Start / stop recording, from any app | ⌃⌥R |
 | Settings | ⌘, |
 
-![Step 4 of 4: a progress bar, a segment counter, an estimate of the time left,
-and the speaker and language of the segment being transcribed](docs/progress.png)
+![A running job as the main content: the four steps with «Finner talere»
+active, the current sub-step, a progress bar, «50 % · under ett minutt igjen»
+estimated from the previous run, and Pause and Stopp right below](docs/progress.png)
 
 Writes `<name>.txt`, `<name>.srt` and `<name>.json` to the folder you chose —
 or whichever of those you ticked under **Eksportformater** in Settings. The

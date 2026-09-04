@@ -70,7 +70,8 @@ struct WorkflowStepper: View {
 /// Slippsonen. Hele vinduet tar imot slipp (ContentView); boksen er hintet.
 private struct DropZone<Content: View>: View {
     let dropping: Bool
-    var minHeight: CGFloat = 140
+    /// Fast, ikke min: formen er grådig og ville ellers tatt all ledig høyde.
+    var height: CGFloat = 140
     @ViewBuilder let content: Content
 
     var body: some View {
@@ -79,7 +80,7 @@ private struct DropZone<Content: View>: View {
             .foregroundStyle(dropping ? Color.accentColor : Color.secondary.opacity(0.4))
             .background(dropping ? Color.accentColor.opacity(0.07) : .clear,
                         in: RoundedRectangle(cornerRadius: 10))
-            .frame(minHeight: minHeight)
+            .frame(height: height)
             .animation(.easeOut(duration: 0.15), value: dropping)
             .overlay { content.padding(16) }
     }
@@ -170,7 +171,7 @@ struct JobSetupView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            DropZone(dropping: dropping, minHeight: 88) {
+            DropZone(dropping: dropping, height: 88) {
                 HStack(spacing: 12) {
                     FileHeader(input: input, duration: duration)
                     Spacer()
@@ -197,6 +198,7 @@ struct JobSetupView: View {
                         ForEach(1...12, id: \.self) { Text("\($0)").tag($0) }
                     }
                     .labelsHidden().fixedSize()
+                    .accessibilityLabel("Antall talere")
                     .help("Oppgi antallet hvis du vet det. Automatisk lar backend anslå.")
                 }
             }
@@ -276,17 +278,22 @@ private struct FileHeader: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(input.lastPathComponent).font(.headline).lineLimit(1)
-                Text(meta).font(.caption).foregroundStyle(.secondary)
-                    .lineLimit(1).truncationMode(.head)
+                // To Text, ikke én: en lang sti hode-avkortes, og med
+                // varigheten i samme streng var det den som forsvant først.
+                HStack(spacing: 4) {
+                    if let length { Text("\(length) ·") }
+                    Text(input.deletingLastPathComponent().path)
+                        .lineLimit(1).truncationMode(.head)
+                }
+                .font(.caption).foregroundStyle(.secondary)
             }
         }
     }
 
-    private var meta: String {
-        let folder = input.deletingLastPathComponent().path
-        guard let duration, duration > 0 else { return folder }
+    private var length: String? {
+        guard let duration, duration > 0 else { return nil }
         let pattern: Duration.TimeFormatStyle.Pattern = duration >= 3600 ? .hourMinuteSecond : .minuteSecond
-        return "\(Duration.seconds(duration).formatted(.time(pattern: pattern))) · \(folder)"
+        return Duration.seconds(duration).formatted(.time(pattern: pattern))
     }
 }
 

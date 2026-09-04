@@ -83,6 +83,21 @@ struct SpeakerEditorView: View {
                 }
             }
             .padding(.horizontal, 24).padding(.vertical, 10)
+            // Eksportstatusen står her, ikke i verktøylinja: der ble den lagt
+            // ved siden av søkefeltet, og ved 900 pt fløt hele linja over i «»».
+            if let status {
+                HStack(spacing: 6) {
+                    Text(status).font(.callout).foregroundStyle(failed ? .red : .secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                    if !failed, let first = written.first {
+                        Button("Vis i Finder") {
+                            NSWorkspace.shared.activateFileViewerSelecting([first])
+                        }
+                        .buttonStyle(.link).font(.callout)
+                    }
+                }
+                .padding(.horizontal, 24).padding(.bottom, 8)
+            }
             Divider()
             if hasSummary {
                 // Navnet er for VoiceOver; labelsHidden skjuler det bare visuelt.
@@ -100,7 +115,6 @@ struct SpeakerEditorView: View {
             }
         }
         .frame(minWidth: 340)
-        .animation(.default, value: hasSummary)
         // Talere er egenskaper ved innholdet, ikke navigasjon — altså en
         // inspektør, med systemets egen kant, bredde og av/på-knapp.
         .inspector(isPresented: showInspector) {
@@ -134,19 +148,6 @@ struct SpeakerEditorView: View {
                 // norsk tastatur, og målt her nådde ⌘⌥8 aldri knappen.
                 Button("Tilbake", systemImage: "chevron.left", action: onNewJob)
                     .keyboardShortcut(.upArrow)
-            }
-            ToolbarItem(placement: .status) {
-                if let status {
-                    HStack(spacing: 6) {
-                        Text(status).font(.callout).foregroundStyle(failed ? .red : .secondary)
-                        if !failed, let first = written.first {
-                            Button("Vis i Finder") {
-                                NSWorkspace.shared.activateFileViewerSelecting([first])
-                            }
-                            .buttonStyle(.link).font(.callout)
-                        }
-                    }
-                }
             }
             ToolbarItem(placement: .primaryAction) {
                 // Snarveien ⌘⌥T ligger i Vis-menyen (SchousApp), så verktøylinja

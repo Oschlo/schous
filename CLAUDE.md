@@ -670,6 +670,12 @@ om vinduet. Det som ser vilkårlig ut i koden, og ikke er det:
   gir `2026-09-03 Tittel` eller kildefilas navn; datoen er inputfilas
   `creationDate`. Bare *navnet* på filene i målmappa endres — innholdet er
   fortsatt den byte-eksakte porten, og `output/` i jobbmappa røres ikke.
+- **Eksportstatusen står under arbeidsflyt-linja, ikke i verktøylinja.** Målt
+  2026-09-04 ved 900 pt: med «Lagret TXT som «klipp-a» i Møtereferater» som
+  `ToolbarItem(.status)` ved siden av søkefeltet fløt hele verktøylinja over i
+  «»», og innholdet under sto forskjøvet oppover til første token kom. Med
+  statusen som egen rad, og uten `.animation(value: hasSummary)` på
+  dokumentkolonnen, forsvant begge deler.
 - **`outputPath` eies av `AppSettings`.** Innstillinger → Generelt viser den,
   så den kunne ikke bo som `@State` i `ContentView` lenger.
 - **Innstillinger er en `TabView` uten fast høyde.** macOS setter tittelen

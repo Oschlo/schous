@@ -75,7 +75,8 @@ private struct TranscriptionPane: View {
         Form {
             Section("Backend") {
                 HStack {
-                    TextField("mac-local-transcribe-with-diarization", text: $settings.backendPath)
+                    TextField("Mappe", text: $settings.backendPath,
+                              prompt: Text("mac-local-transcribe-with-diarization"))
                         .textFieldStyle(.roundedBorder)
                     Button("Velg…", action: pickBackend)
                 }
