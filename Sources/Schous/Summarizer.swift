@@ -121,9 +121,13 @@ final class Summarizer: ObservableObject {
 
     /// `timeoutIntervalForRequest` er stillhet *mellom* to datapakker, ikke
     /// total tid. Et to timers møte får ta tiden det tar; en modell i
-    /// tenkesløyfe (gemma4:12b, målt > 900 s i #32) stoppes etter 120 s uten
-    /// et eneste token. Injiserbar så selfcheck kan se den utløse på 1 s.
-    init(timeout: TimeInterval = 120) {
+    /// tenkesløyfe (gemma4:12b, målt > 900 s i #32) stoppes etter 600 s uten
+    /// et eneste token. think:false dekker allerede tenkesløyfe-tilfellet, og
+    /// «Stopp» finnes for den som ikke vil vente. Målt 2026-09-04: en kald
+    /// 27B-modell (qwen3.8:27b-mlx) med en 18k-tokens prompt sender ingen
+    /// pakker i 117 s under prefill — 120 s feilet på nøyaktig dette.
+    /// Injiserbar så selfcheck kan se den utløse på 1 s.
+    init(timeout: TimeInterval = 600) {
         self.timeout = timeout
         let cfg = URLSessionConfiguration.ephemeral
         cfg.timeoutIntervalForRequest = timeout
@@ -140,12 +144,12 @@ final class Summarizer: ObservableObject {
             guard let self else { return }
             do {
                 try await self.stream(prompt: prompt, model: model, baseURL: baseURL)
+                guard !Task.isCancelled else { return }
                 guard !self.text.isEmpty else {
                     self.state = .failed("Modellen svarte tomt. Den brukte trolig hele "
                         + "budsjettet på tenking; prøv en annen modell.")
                     return
                 }
-                guard !Task.isCancelled else { return }
                 try self.write(to: writeTo)
                 self.state = .done(writeTo[0])
             } catch is CancellationError {
@@ -198,9 +202,23 @@ final class Summarizer: ObservableObject {
             }
             throw HTTPError(status: status, body: msg)
         }
+        // Strupt publisering: målt 2026-09-04 på en 8.8k-ords transkripsjon —
+        // ollama strømmet ferdig på ~6 min, appen brukte så ~7 min til på
+        // 100 % CPU i SwiftUI-layout som tygget bufrede tokens (ett re-render
+        // per linje, se `SpeakerEditorView.hasSummary`). `pending` samles opp
+        // og flushes til `text` maks ti ganger i sekundet.
+        var pending = ""
+        var lastFlush = Date.distantPast
+        defer { if !pending.isEmpty { text += pending } }
         for try await line in bytes.lines {
             guard let chunk = Self.parse(line) else { continue }
-            text += chunk.content
+            pending += chunk.content
+            let now = Date()
+            if chunk.done || now.timeIntervalSince(lastFlush) >= 0.1 {
+                text += pending
+                pending = ""
+                lastFlush = now
+            }
             if chunk.done {
                 if let n = chunk.promptEvalCount { NSLog("Schous referat: prompt_eval_count=%d", n) }
                 return

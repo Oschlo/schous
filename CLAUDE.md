@@ -330,7 +330,7 @@ Fire ting som er målt og som koden hviler på:
   thinking-kapabilitet svarer 200 på feltet, så det finnes ingen retry-gren.
 - **Fristen er stillhet, ikke total tid.** `timeoutIntervalForRequest` er tid
   mellom to datapakker. Et langt møte får ta tiden det tar; en modell i
-  tenkesløyfe (gemma4:12b, > 900 s i #32) stoppes etter 120 s uten token.
+  tenkesløyfe (gemma4:12b, > 900 s i #32) stoppes etter 600 s uten token.
   `--selfcheck` kjører den mot `nc -l` som sender én bit og tier, med fristen
   på 1 s, og krever både meldingen *og* at det tok under 4 s. Målt i Task 3
   utløste den på en halvåpen respons — `nc` sendte én bit, holdt socketen åpen
@@ -345,13 +345,15 @@ Fire ting som er målt og som koden hviler på:
   her (10 015 ord): `prompt_eval_count=18279` mot en `context_length` på 32 768,
   altså ingen klipping og ingen grunn til `num_ctx`. To ting kostet tid likevel,
   begge utenfor prompten: kald prompt-evaluering på `qwen3.8:27b-mlx` brukte
-  117 s uten å sende ett eneste token, så 120 s-fristen over løste ut 8 s før
-  første token — ollama-loggen viser prompten ferdig 14:56:09, appen ga opp
-  14:56:01 — og med varm prefiks-cache tok kjøringen 13 min 38 s fra «Lag
+  117 s uten å sende ett eneste token, så den daværende 120 s-fristen løste ut
+  8 s før første token — ollama-loggen viser prompten ferdig 14:56:09, appen ga
+  opp 14:56:01 — derfor er fristen nå 600 s: think:false dekker allerede
+  tenkesløyfe-tilfellet over, og «Stopp» finnes for den som ikke vil vente på en
+  kald 27B-modell. Med varm prefiks-cache tok kjøringen 13 min 38 s fra «Lag
   referat» til «Referat lagret», hvorav ollama var ferdig etter ~6 min og resten
   var appen på 100 % CPU i SwiftUI-layout, fordi hele `SpeakerEditorView`
-  tegnes på nytt per token. Strupet publisering av `summarizer.text` er fiksen;
-  den er ikke gjort her.
+  tegnes på nytt per token. Strupet publisering av `summarizer.text` fikser
+  dette — `text` oppdateres nå maks ti ganger i sekundet.
 
 `thinking`-feltet i strømmen leses ikke. Slipper det inn, står modellens
 grubling i referatet.
