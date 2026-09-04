@@ -28,7 +28,9 @@ enum Hotkey {
 
     /// Samme som «Åpne Schous» i menyen: løft vinduet der opptaket nå ligger
     /// forhåndsvalgt. Utenfor en View finnes ingen `openWindow`, så dette
-    /// finner NSWindow-et scenen «main» eier.
+    /// finner NSWindow-et scenen «main» eier. Det ligger i `windows` også
+    /// etter at brukeren har lukket det — målt på v0.5.0 (#46), så ingen
+    /// reserve via `openWindow` trengs.
     @MainActor static func showMainWindow() {
         NSApplication.shared.activate(ignoringOtherApps: true)
         if let w = NSApplication.shared.windows.first(where: { $0.identifier?.rawValue.hasPrefix("main") == true }) {
