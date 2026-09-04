@@ -73,16 +73,23 @@ struct SummaryControls: View {
                 context = saved
             }
             if settings.models == nil { await settings.refreshModels() }
-            // Standardmodellen kan være avinstallert siden sist; da har den
-            // ingen tag i Picker-en, og knappen ville sendt et 404.
-            let models = settings.models ?? []
-            model = models.contains(settings.summaryModel) ? settings.summaryModel : (models.first ?? "")
+            pickModel(settings.summaryModel)
         }
+        // Lista byttes ut fra Innstillinger (ny URL, «Hent modeller»); et valg
+        // som ikke finnes der lenger ville sendt et 404.
+        .onChange(of: settings.models) { _, _ in pickModel(model) }
         // «Åpne malmappe» går til Finder; når vi får fokus igjen er mappa
         // kanskje ikke tom lenger.
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             rescanTemplates()
         }
+    }
+
+    /// Standardmodellen kan være avinstallert siden sist; da har den ingen
+    /// tag i Picker-en, og knappen ville sendt et 404.
+    private func pickModel(_ wanted: String) {
+        let models = settings.models ?? []
+        model = models.contains(wanted) ? wanted : (models.first ?? "")
     }
 
     private func rescanTemplates() {

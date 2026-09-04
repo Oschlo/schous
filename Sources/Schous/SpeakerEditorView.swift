@@ -93,6 +93,9 @@ struct SpeakerEditorView: View {
         .onChange(of: summarizer.state) { _, new in
             if new == .running { pane = .summary }
         }
+        // «Tilbake» tar med seg Stopp-knappen. Uten dette holdt Task-en
+        // Summarizer i live, og referatet ble skrevet etter at du hadde gått.
+        .onDisappear { summarizer.cancel() }
     }
 
     private var transcript: some View {

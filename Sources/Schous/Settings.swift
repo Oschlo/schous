@@ -144,7 +144,10 @@ final class AppSettings: ObservableObject {
     @Published var checking = false
 
     /// Referat. Alt i UserDefaults; prompten kan justeres uten ny build.
-    @Published var ollamaURL: String { didSet { UserDefaults.standard.set(ollamaURL, forKey: "ollamaURL") } }
+    /// Ny URL, ny server: den gamle modellista gjelder ikke lenger.
+    @Published var ollamaURL: String {
+        didSet { UserDefaults.standard.set(ollamaURL, forKey: "ollamaURL"); models = nil }
+    }
     @Published var summaryModel: String { didSet { UserDefaults.standard.set(summaryModel, forKey: "summaryModel") } }
     @Published var summaryLanguage: SummaryLanguage {
         didSet { UserDefaults.standard.set(summaryLanguage.rawValue, forKey: "summaryLanguage") }
@@ -334,6 +337,7 @@ struct SettingsView: View {
             Section("Referat") {
                 TextField("ollama-URL", text: $settings.ollamaURL)
                     .textFieldStyle(.roundedBorder)
+                    .onSubmit { Task { await settings.refreshModels() } }
                 HStack {
                     if let models = settings.models {
                         Picker("Standardmodell", selection: $settings.summaryModel) {
