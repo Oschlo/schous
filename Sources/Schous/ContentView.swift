@@ -64,9 +64,12 @@ struct ContentView: View {
         // Dock-ikonet spretter når jobben er ferdig og appen ikke er fremst;
         // er den fremst, ignorerer macOS forespørselen selv. VoiceOver får
         // beskjed uansett — en fargeendring og et sprett er ikke en melding.
-        .onChange(of: job.state) { _, new in
+        .onChange(of: job.state) { old, new in
             switch new {
             case .done:
+                // «Åpne resultat» går også hit; da er ingenting transkribert,
+                // og VoiceOver sa likevel «Transkripsjonen er ferdig» (målt 2026-09-05).
+                guard old == .running || old == .paused else { break }
                 NSApplication.shared.requestUserAttention(.informationalRequest)
                 announce("Transkripsjonen er ferdig")
             case .stopped(let n):

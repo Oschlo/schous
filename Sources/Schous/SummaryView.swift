@@ -51,13 +51,11 @@ struct SummaryControls: View {
                 Picker("Mal", selection: $selection.template) {
                     ForEach(templates, id: \.self) { Text(Templates.name($0)).tag(Optional($0)) }
                 }
-                .accessibilityLabel("Mal")
             }
             if let models = settings.models {
                 Picker("Modell", selection: $selection.model) {
                     ForEach(models, id: \.self) { Text(settings.modelLabel($0)).tag($0) }
                 }
-                .accessibilityLabel("Modell")
                 // Startbildet lover lokal transkribering; dette er stedet
                 // løftet slutter. En ekstern server eller en skymodell
                 // (videresendt fra lokal ollama) sender møtet ut av Macen.
@@ -77,7 +75,6 @@ struct SummaryControls: View {
             Picker("Språk", selection: $selection.language) {
                 ForEach(SummaryLanguage.allCases) { Text($0.label).tag($0) }
             }
-            .accessibilityLabel("Språk")
             VStack(alignment: .leading, spacing: 4) {
                 Text("Kontekst").font(.callout)
                 TextEditor(text: $selection.context)

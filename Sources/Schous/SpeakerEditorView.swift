@@ -85,6 +85,11 @@ struct SpeakerEditorView: View {
             // toppen, og da statusen dukket opp første gang sto begge kolonnene
             // forskjøvet opp under verktøylinja til neste layout-runde (målt
             // 2026-09-05) — samme feil som bunnen i inspektøren hadde.
+            // Søkefeltet står her og ikke i verktøylinja, av to målte grunner
+            // (2026-09-05): som ToolbarItem(.principal) tok det 208 pt, og under
+            // 760 pt vindusbredde forsvant «Eksporter» stille — ingen «»»,
+            // ingen knapp, i et vindu appen tillater ned til 620. Og ⌘F fikk
+            // aldri fokus dit: @FocusState nådde ikke inn i verktøylinja.
             HStack(spacing: 6) {
                 Text(status ?? "⌘S eksporterer til «\(outputDir.lastPathComponent)»")
                     .font(.callout).foregroundStyle(failed ? .red : .secondary)
@@ -96,8 +101,19 @@ struct SpeakerEditorView: View {
                     }
                     .buttonStyle(.link).font(.callout)
                 }
+                Spacer()
+                if !query.isEmpty {
+                    Text("\(shown.count) treff").font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+                }
+                // Egen TextField, ikke .searchable: fokus fra ⌘F kan
+                // ikke styres programmatisk før macOS 15.
+                TextField("Søk i transkripsjonen", text: $query)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 200)
+                    .focused($searchFocused)
+                    .accessibilityLabel("Søk i transkripsjonen")
             }
-            .frame(height: 20)
+            .frame(height: 24)
             .padding(.horizontal, 24).padding(.top, 4).padding(.bottom, 8)
             Divider()
             document
@@ -117,20 +133,6 @@ struct SpeakerEditorView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .toolbar {
-            ToolbarItem(placement: .principal) {
-                HStack(spacing: 6) {
-                    // Egen TextField, ikke .searchable: fokus fra ⌘F kan
-                    // ikke styres programmatisk før macOS 15.
-                    TextField("Søk i transkripsjonen", text: $query)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 200)
-                        .focused($searchFocused)
-                        .accessibilityLabel("Søk i transkripsjonen")
-                    if !query.isEmpty {
-                        Text("\(shown.count) treff").font(.callout.monospacedDigit()).foregroundStyle(.secondary)
-                    }
-                }
-            }
             ToolbarItem(placement: .navigation) {
                 // Det knappen alltid har gjort: tilbake til oppsettet, med fila
                 // fortsatt valgt. «Ny fil» var feil navn på det.
@@ -224,14 +226,18 @@ struct SpeakerEditorView: View {
                     let stamp = String(ts(s.start, ".").dropLast(4))
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 8) {
-                            Button(stamp) {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(stamp, forType: .string)
-                            }
-                            .buttonStyle(.plain)
-                            .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                            .help("Kopier tidsstempel")
-                            .accessibilityLabel("Tidsstempel \(stamp), kopier")
+                            // Tekst med trykk, ikke Button: som knapp var hvert
+                            // tidsstempel et Tab-stopp, så et møte på 500
+                            // segmenter lå mellom dokumentvelgeren og
+                            // inspektøren (målt 2026-09-05). VoiceOver får
+                            // fortsatt en knapp med handling.
+                            Text(stamp)
+                                .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                                .onTapGesture { copy(stamp) }
+                                .help("Kopier tidsstempel")
+                                .accessibilityLabel("Tidsstempel \(stamp), kopier")
+                                .accessibilityAddTraits(.isButton)
+                                .accessibilityAction { copy(stamp) }
                             Text(label(s.speaker))
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(color(for: root(s.speaker)))
@@ -287,6 +293,11 @@ struct SpeakerEditorView: View {
     }
 
     // MARK: - Hjelpere
+
+    private func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
 
     private func count(_ id: String) -> Int { job.segments.count { $0.speaker == id } }
 

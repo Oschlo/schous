@@ -673,9 +673,39 @@ om vinduet. Det som ser vilkårlig ut i koden, og ikke er det:
   (målt 100 %, se «Referat går rett til ollama») verre. Ingen pakke:
   `AttributedString(markdown:)` tar inline, overskrifter og lister deles ut
   linje for linje. `<aside>` hoppes over.
-- **Søket er en egen `TextField`, ikke `.searchable`.** Fokus fra ⌘F kan ikke
-  styres programmatisk før macOS 15, og plattformen er 14.2. Vis-menyen poster
-  `.focusSearch`; editoren setter `@FocusState`.
+- **Søket er en egen `TextField`, ikke `.searchable`, og det står i topplinja,
+  ikke i verktøylinja.** Fokus fra ⌘F kan ikke styres programmatisk før macOS
+  15, og plattformen er 14.2. Vis-menyen poster `.focusSearch`; editoren setter
+  `@FocusState`. Som `ToolbarItem(.principal)` virket det ikke: ⌘F flyttet
+  aldri fokus dit (målt 2026-09-05 fra knapp og fra tekstfelt), og feltets
+  208 pt gjorde at «Eksporter» forsvant stille under 760 pt — ingen «»»,
+  ingen knapp, i et vindu appen tillater ned til 620. Med feltet i topplinja
+  står Eksporter ved 620 og ⌘F treffer.
+- **Tidsstemplene er `Text` med trykk, ikke `Button`.** Som knapper var hvert
+  av dem et Tab-stopp, så et møte på 500 segmenter lå mellom dokumentvelgeren
+  og inspektøren (målt 2026-09-05 med tastaturnavigering). VoiceOver får
+  fortsatt en knapp: `.isButton`-trait og `.accessibilityAction`.
+- **Døde steg i arbeidsflytlinja er ikke knapper.** Med
+  `allowsHitTesting(false)` var de fire stegene i oppsettet fortsatt i
+  Tab-rekkefølgen, og det første fikk fokus ved start. Og en knapp med
+  `Image(systemName: "checkmark")` i etiketten blir `AXSelected` av seg selv,
+  så VoiceOver sa «markert» om de ferdige stegene; `.accessibilityRemoveTraits`
+  tar det bort.
+- **Én etikett per kontroll.** `Picker("Mal")` + `.accessibilityLabel("Mal")`
+  ga «Mal Mal» i VoiceOver, og `LabeledContent` + `labelsHidden()` +
+  `.accessibilityLabel` ga «Antall talere» tre ganger. Picker-tittelen er
+  etiketten; ikke legg på en til.
+- **Tilgjengelighetsrunden er målt, ikke antatt** (2026-09-05, se
+  [#40](https://github.com/Oschlo/schous/issues/40)): tastaturnavigering med
+  `AppleKeyboardUIMode 2`, VoiceOver via AppleScript (`content of last
+  phrase` gir det VO faktisk sa; «Tillat at VoiceOver styres med AppleScript»
+  må slås på i VoiceOver-verktøy for hånd — `defaults write` mot
+  `com.apple.VoiceOver4/default` tok ikke), og økt kontrast / redusert
+  gjennomsiktighet / redusert bevegelse slått på i Systemvalg for hånd, fordi
+  `com.apple.universalaccess` ikke kan skrives fra et skall. Systemets
+  Tekststørrelse gjør ingenting med appen — og ikke med
+  `NSFont.preferredFont(forTextStyle:)` i en naken binær heller (13/17 pt med
+  globalen på XXXL), så det er plattformen, ikke appen.
 - **«Lagre» heter «Eksporter», ⌘S står.** Knappen skriver TXT/SRT/JSON til
   målmappa, og det er eksport. Snarveien er dokumentert og innarbeidet.
 - **Tittelen er `title.txt` i jobbmappa** (#42), ved siden av `context.txt`

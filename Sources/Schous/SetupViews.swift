@@ -45,8 +45,7 @@ struct WorkflowStepper: View {
         let open = reachable.contains(step)
         let clickable = onSelect != nil && (done || active || open)
         let status = active ? "aktivt" : done ? "ferdig" : open ? "tilgjengelig" : "gjenstår"
-        return Button { onSelect?(step) } label: {
-            HStack(spacing: 6) {
+        let row = HStack(spacing: 6) {
                 ZStack {
                     Circle()
                         .fill(active ? Color.accentColor : done ? Color.accentColor.opacity(0.18) : Color.clear)
@@ -62,17 +61,30 @@ struct WorkflowStepper: View {
                 Text(step.title)
                     .fontWeight(active ? .semibold : .regular)
                     .foregroundStyle(active || open ? .primary : .secondary)
+        }
+        // Et steg som ikke kan trykkes er ikke en knapp. Som Button med
+        // allowsHitTesting(false) sto de fire døde stegene i oppsettet i
+        // Tab-rekkefølgen, og det første av dem fikk fokus ved start (målt
+        // 2026-09-05 med tastaturnavigering på).
+        return Group {
+            if clickable {
+                Button { onSelect?(step) } label: { row }
+                    .buttonStyle(.plain)
+                    .help(active ? "" : "Gå til \(step.title)")
+            } else {
+                row.accessibilityElement(children: .combine)
             }
         }
-        .buttonStyle(.plain)
-        .allowsHitTesting(clickable)
-        .help(clickable && !active ? "Gå til \(step.title)" : "")
         // Ingen .accessibilityElement(children: .ignore): med den sto stegene
         // som AXUnknown uten navn i AX-treet (målt 2026-09-05), altså
         // usynlige for VoiceOver. Knappen slår selv barna sammen til ett
         // element, og navnet under overstyrer teksten i den.
         .accessibilityLabel("Steg \(step.rawValue) av 4, \(step.title), \(status)")
+        // Remove også: en knapp med et checkmark-symbol i etiketten blir
+        // AXSelected av seg selv, så VoiceOver sa «markert» om de ferdige
+        // stegene i tillegg til det aktive (målt 2026-09-05).
         .accessibilityAddTraits(active ? .isSelected : [])
+        .accessibilityRemoveTraits(active ? [] : .isSelected)
     }
 }
 
@@ -206,15 +218,14 @@ struct JobSetupView: View {
                         .buttonStyle(.borderless)
                     }
                 }
-                LabeledContent("Antall talere") {
-                    Picker("Antall talere", selection: $speakers) {
-                        Text("Automatisk").tag(0)
-                        ForEach(1...12, id: \.self) { Text("\($0)").tag($0) }
-                    }
-                    .labelsHidden().fixedSize()
-                    .accessibilityLabel("Antall talere")
-                    .help("Oppgi antallet hvis du vet det. Automatisk lar backend anslå.")
+                // Pickerens egen etikett, ikke LabeledContent + labelsHidden +
+                // accessibilityLabel: VoiceOver leste «Antall talere» tre ganger.
+                Picker("Antall talere", selection: $speakers) {
+                    Text("Automatisk").tag(0)
+                    ForEach(1...12, id: \.self) { Text("\($0)").tag($0) }
                 }
+                .fixedSize()
+                .help("Oppgi antallet hvis du vet det. Automatisk lar backend anslå.")
             }
 
             messages

@@ -62,6 +62,7 @@ struct SpeakerInspector: View {
             }
         } label: {
             Image(systemName: mergedInto[id] == nil ? "person" : "person.2.fill")
+                .accessibilityHidden(true)   // ellers leser VoiceOver «person» foran etiketten
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
