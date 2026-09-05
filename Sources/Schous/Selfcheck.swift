@@ -437,11 +437,33 @@ private func documentSelfcheck() {
 
     // Det malene faktisk produserer. <aside> fra Notion-eksporten hoppes over,
     // og en avsluttende tomlinje blir ikke en .blank.
-    let md = "# Tittel\n\n## Del\n- punkt\n- [ ] åpen\n- [x] gjort\n1. første\nVanlig **fet** tekst\n<aside>hopp</aside>\n"
+    // Bare aside-taggene: en autolenke begynner også med «<» og skal med.
+    let md = "# Tittel\n\n## Del\n- punkt\n- [ ] åpen\n- [x] gjort\n1. første\nVanlig **fet** tekst\n"
+        + "<aside>\nhopp\n</aside>\n<https://example.com>\n"
     let blocks = MarkdownBlock.parse(md)
     check(blocks == [.heading(1, "Tittel"), .blank, .heading(2, "Del"), .bullet("punkt"), .task(false, "åpen"),
-                     .task(true, "gjort"), .numbered(1, "første"), .paragraph("Vanlig **fet** tekst")],
+                     .task(true, "gjort"), .numbered(1, "første"), .paragraph("Vanlig **fet** tekst"),
+                     .paragraph("hopp"), .paragraph("<https://example.com>")],
           "markdown-blokker: \(blocks)")
+
+    // Hvor referatet går. Svaret er ollama 0.33 sitt eget, med og uten
+    // remote_host; navnet alene skiller ikke sky fra lokalt.
+    let tags = Data("""
+    {"models":[{"name":"gemma4:31b-cloud","remote_model":"gemma4:31b","remote_host":"https://ollama.com:443"},
+               {"name":"ministral-3:latest","size":6022236616}]}
+    """.utf8)
+    let parsed = Ollama.parse(tags) ?? []
+    let remote = Set(parsed.filter { $0.remote_host != nil }.map(\.name))
+    check(parsed.map(\.name) == ["gemma4:31b-cloud", "ministral-3:latest"] && remote == ["gemma4:31b-cloud"],
+          "ollama-modeller: \(parsed)")
+    let local = URL(string: "http://localhost:11434")!
+    check(AppSettings.summaryDestination(baseURL: local, model: "ministral-3:latest", remote: remote) == nil,
+          "lokal modell på lokal ollama er lokal")
+    check(AppSettings.summaryDestination(baseURL: local, model: "gemma4:31b-cloud", remote: remote) == "ollama.com",
+          "skymodell på lokal ollama går til ollama.com")
+    check(AppSettings.summaryDestination(baseURL: URL(string: "http://10.0.0.5:11434")!,
+                                         model: "ministral-3:latest", remote: remote) == "10.0.0.5",
+          "ekstern server går dit uansett modell")
     check(MarkdownBlock.parse("").isEmpty && MarkdownBlock.parse("\n\n").isEmpty, "tomt dokument gir ingen blokker")
 
     check(filenameSafe("Coast: intro / AI") == "Coast- intro - AI", filenameSafe("Coast: intro / AI"))

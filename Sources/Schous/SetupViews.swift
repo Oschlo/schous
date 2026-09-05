@@ -18,6 +18,10 @@ enum WorkflowStep: Int, CaseIterable, Identifiable {
 struct WorkflowStepper: View {
     let current: WorkflowStep
     var completed: Set<WorkflowStep> = []
+    /// Kan trykkes uten å være ferdig. Etter transkriberingen er Talere og
+    /// Referat to sider av samme resultat, ikke to trinn i rekkefølge; uten
+    /// dette sto Talere som «gjenstår» og var dødt fra Referat.
+    var reachable: Set<WorkflowStep> = []
     var onSelect: ((WorkflowStep) -> Void)? = nil
 
     var body: some View {
@@ -38,8 +42,9 @@ struct WorkflowStepper: View {
     private func item(_ step: WorkflowStep) -> some View {
         let done = completed.contains(step)
         let active = step == current
-        let clickable = onSelect != nil && (done || active)
-        let status = active ? "aktivt" : done ? "ferdig" : "gjenstår"
+        let open = reachable.contains(step)
+        let clickable = onSelect != nil && (done || active || open)
+        let status = active ? "aktivt" : done ? "ferdig" : open ? "tilgjengelig" : "gjenstår"
         return Button { onSelect?(step) } label: {
             HStack(spacing: 6) {
                 ZStack {
@@ -56,12 +61,16 @@ struct WorkflowStepper: View {
                 }
                 Text(step.title)
                     .fontWeight(active ? .semibold : .regular)
-                    .foregroundStyle(active ? .primary : .secondary)
+                    .foregroundStyle(active || open ? .primary : .secondary)
             }
         }
         .buttonStyle(.plain)
         .allowsHitTesting(clickable)
-        .accessibilityElement(children: .ignore)
+        .help(clickable && !active ? "Gå til \(step.title)" : "")
+        // Ingen .accessibilityElement(children: .ignore): med den sto stegene
+        // som AXUnknown uten navn i AX-treet (målt 2026-09-05), altså
+        // usynlige for VoiceOver. Knappen slår selv barna sammen til ett
+        // element, og navnet under overstyrer teksten i den.
         .accessibilityLabel("Steg \(step.rawValue) av 4, \(step.title), \(status)")
         .accessibilityAddTraits(active ? .isSelected : [])
     }
@@ -120,7 +129,12 @@ struct EmptyStateView: View {
 
             Divider().frame(maxWidth: 360).padding(.top, 8)
             setupStatus
-            Text("Lyd og transkripsjon behandles lokalt på denne Macen.")
+            // Avgrenset med vilje: referatet sendes til modellen som velges,
+            // og Referat-fanen sier fra hvis den ikke er på denne Macen.
+            Text("Transkriberingen skjer lokalt på denne Macen. Et referat går til modellen du velger — "
+                 + "appen sier fra hvis den ligger utenfor.")
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
                 .font(.caption).foregroundStyle(.secondary)
         }
         .frame(maxWidth: 460)

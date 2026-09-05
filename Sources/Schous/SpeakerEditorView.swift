@@ -16,12 +16,12 @@ struct SpeakerEditorView: View {
     /// Det «Eksporter» sist skrev, så «Vis i Finder» har noe å peke på.
     @State private var written: [URL] = []
 
-    /// Inspektøren viser ett arbeidstrinn om gangen. `wantsInspector` er
-    /// brukerens valg; `narrow` er vinduets. Under 760 pt (620 minimum +
-    /// 240 inspektør, minus luft) ville to kolonner klemt transkripsjonen.
+    /// Inspektøren viser ett arbeidstrinn om gangen. Den skjuler seg aldri
+    /// av seg selv: en terskel på 760 pt gjorde Talere og Referat
+    /// utilgjengelige i et vindu appen selv tillater (620 minimum). Ved 620
+    /// får transkripsjonen 380 pt, og den som vil ha mer skjuler den med ⌘⌥T.
     @State private var tab: InspectorTab = .speakers
-    @State private var wantsInspector = true
-    @State private var narrow = false
+    @State private var showInspector = true
     @State private var summarySelection = SummarySelection()
     /// Tittelen som blir filnavnet (#42). Lagres som title.txt i jobbmappa;
     /// tom = kildefilas navn.
@@ -68,68 +68,54 @@ struct SpeakerEditorView: View {
     }
     private var exportBase: String { outputBase(title: title, date: inputDate, fallback: job.base) }
 
-    private var showInspector: Binding<Bool> {
-        Binding(get: { wantsInspector && !narrow }, set: { wantsInspector = $0 })
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             WorkflowStepper(current: tab == .summary ? .summary : .speakers,
-                            completed: [.file, .transcription]) { step in
+                            completed: [.file, .transcription], reachable: [.speakers, .summary]) { step in
                 switch step {
                 case .file, .transcription: onNewJob()
-                case .speakers: tab = .speakers; wantsInspector = true
-                case .summary: tab = .summary; wantsInspector = true
+                case .speakers: tab = .speakers; showInspector = true
+                case .summary: tab = .summary; showInspector = true
                 }
             }
-            .padding(.horizontal, 24).padding(.vertical, 10)
+            .padding(.horizontal, 24).padding(.top, 10)
             // Eksportstatusen står her, ikke i verktøylinja: der ble den lagt
             // ved siden av søkefeltet, og ved 900 pt fløt hele linja over i «»».
-            if let status {
-                HStack(spacing: 6) {
-                    Text(status).font(.callout).foregroundStyle(failed ? .red : .secondary)
-                        .lineLimit(1).truncationMode(.middle)
-                    if !failed, let first = written.first {
-                        Button("Vis i Finder") {
-                            NSWorkspace.shared.activateFileViewerSelecting([first])
-                        }
-                        .buttonStyle(.link).font(.callout)
+            // Fast høyde, alltid til stede: inspektøren er festet under denne
+            // toppen, og da statusen dukket opp første gang sto begge kolonnene
+            // forskjøvet opp under verktøylinja til neste layout-runde (målt
+            // 2026-09-05) — samme feil som bunnen i inspektøren hadde.
+            HStack(spacing: 6) {
+                Text(status ?? "⌘S eksporterer til «\(outputDir.lastPathComponent)»")
+                    .font(.callout).foregroundStyle(failed ? .red : .secondary)
+                    .lineLimit(1).truncationMode(.middle)
+                    .help(status ?? "")
+                if status != nil, !failed, let first = written.first {
+                    Button("Vis i Finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([first])
                     }
+                    .buttonStyle(.link).font(.callout)
                 }
-                .padding(.horizontal, 24).padding(.bottom, 8)
             }
+            .frame(height: 20)
+            .padding(.horizontal, 24).padding(.top, 4).padding(.bottom, 8)
             Divider()
-            if hasSummary {
-                // Navnet er for VoiceOver; labelsHidden skjuler det bare visuelt.
-                Picker("Visning", selection: $pane) {
-                    ForEach(Pane.allCases, id: \.self) { Text($0.rawValue) }
+            document
+                // Fyller alltid. Uten dette sto begge kolonnene forskjøvet
+                // oppover i det referatet startet (tom tekst) og i det det ble
+                // ferdig (bytte Text → MarkdownView) — målt 2026-09-04.
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .frame(minWidth: 340)
+                // Talere er egenskaper ved innholdet, ikke navigasjon — altså
+                // en inspektør, med systemets egen kant, bredde og av/på-knapp.
+                // Festet under arbeidsflytlinja, ikke over den: linja gjelder
+                // hele vinduet og trenger hele bredden — inne i kolonnen
+                // brakk den ordene ved 700 pt («Tran-skri-bering»).
+                .inspector(isPresented: $showInspector) {
+                    inspector.inspectorColumnWidth(min: 240, ideal: 300, max: 420)
                 }
-                .pickerStyle(.segmented).labelsHidden()
-                .padding(8)
-                Divider()
-            }
-            if pane == .summary, hasSummary {
-                SummaryPanel(summarizer: summarizer)
-            } else {
-                transcript
-            }
         }
-        // Fyller alltid. Uten dette sto begge kolonnene forskjøvet oppover i
-        // det referatet startet (tom tekst) og i det det ble ferdig (bytte
-        // Text → MarkdownView) — målt 2026-09-04.
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .frame(minWidth: 340)
-        // Talere er egenskaper ved innholdet, ikke navigasjon — altså en
-        // inspektør, med systemets egen kant, bredde og av/på-knapp.
-        .inspector(isPresented: showInspector) {
-            inspector.inspectorColumnWidth(min: 240, ideal: 300, max: 420)
-        }
-        // Vinduets bredde, ikke kolonnens: 900 pt vindu med 300 pt inspektør
-        // gir en kolonne på 600, og en måling der ville skjult inspektøren,
-        // fått kolonnen til 900, vist den igjen — i sløyfe. Lest fra NSWindow
-        // via en tom AppKit-visning, ikke en GeometryReader: den skrev
-        // tilstand midt i layout.
-        .background(WindowWidthReader { narrow = $0 < 760 })
         .toolbar {
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 6) {
@@ -156,9 +142,8 @@ struct SpeakerEditorView: View {
             ToolbarItem(placement: .primaryAction) {
                 // Snarveien ⌘⌥T ligger i Vis-menyen (SchousApp), så verktøylinja
                 // ikke er eneste inngang. «]» er ⌥9 på norsk tastatur.
-                Button("Inspektør", systemImage: "sidebar.trailing") { wantsInspector.toggle() }
-                    .help(narrow ? "Vinduet er for smalt for inspektøren" : "Vis eller skjul talere og referat")
-                    .disabled(narrow)
+                Button("Inspektør", systemImage: "sidebar.trailing") { showInspector.toggle() }
+                    .help("Vis eller skjul talere og referat")
             }
             ToolbarItem(placement: .primaryAction) {
                 // Alltid til stede, ikke betinget: en verktøylinje som får et
@@ -190,7 +175,7 @@ struct SpeakerEditorView: View {
             save(AppSettings.shared.formats)
         }
         .onReceive(NotificationCenter.default.publisher(for: .toggleInspector)) { _ in
-            wantsInspector.toggle()
+            showInspector.toggle()
         }
         .onReceive(NotificationCenter.default.publisher(for: .focusSearch)) { _ in
             pane = .transcript
@@ -204,6 +189,26 @@ struct SpeakerEditorView: View {
         // «Tilbake» tar med seg Stopp-knappen. Uten dette holdt Task-en
         // Summarizer i live, og referatet ble skrevet etter at du hadde gått.
         .onDisappear { summarizer.cancel() }
+    }
+
+    /// Dokumentkolonnen: transkripsjonen, og referatet når det finnes.
+    @ViewBuilder private var document: some View {
+        VStack(spacing: 0) {
+            if hasSummary {
+                // Navnet er for VoiceOver; labelsHidden skjuler det bare visuelt.
+                Picker("Visning", selection: $pane) {
+                    ForEach(Pane.allCases, id: \.self) { Text($0.rawValue) }
+                }
+                .pickerStyle(.segmented).labelsHidden()
+                .padding(8)
+                Divider()
+            }
+            if pane == .summary, hasSummary {
+                SummaryPanel(summarizer: summarizer)
+            } else {
+                transcript
+            }
+        }
     }
 
     /// Transkripsjonen som et dokument: rolig maksbredde, luft mellom
@@ -374,42 +379,6 @@ struct SpeakerEditorView: View {
                           < (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate ?? .distantPast) ?? .distantPast }),
            let text = try? String(contentsOf: prior, encoding: .utf8) {
             summarizer.text = text
-        }
-    }
-}
-
-/// Rapporterer bredden på vinduet visningen ligger i, ved innsetting og ved
-/// hver endring av størrelse. Null i utstrekning, utenfor SwiftUI-layouten.
-private struct WindowWidthReader: NSViewRepresentable {
-    let onWidth: (CGFloat) -> Void
-
-    func makeNSView(context: Context) -> Probe { Probe(onWidth: onWidth) }
-    func updateNSView(_ view: Probe, context: Context) { view.onWidth = onWidth }
-
-    final class Probe: NSView {
-        var onWidth: (CGFloat) -> Void
-        init(onWidth: @escaping (CGFloat) -> Void) {
-            self.onWidth = onWidth
-            super.init(frame: .zero)
-        }
-        required init?(coder: NSCoder) { nil }
-        // Selector, ikke blokk: en selector-observer fjernes selv når visningen
-        // dør, så det trengs verken token eller deinit.
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            NotificationCenter.default.removeObserver(self)
-            guard let window else { return }
-            NotificationCenter.default.addObserver(self, selector: #selector(resized(_:)),
-                                                   name: NSWindow.didResizeNotification, object: window)
-            report(window.frame.width)
-        }
-        @objc private func resized(_ n: Notification) {
-            if let w = (n.object as? NSWindow)?.frame.width { report(w) }
-        }
-        /// Utenfor layout-runden: dette kalles fra viewDidMoveToWindow, som
-        /// er midt i den.
-        private func report(_ width: CGFloat) {
-            DispatchQueue.main.async { [weak self] in self?.onWidth(width) }
         }
     }
 }

@@ -305,16 +305,27 @@ final class Summarizer: ObservableObject {
 }
 
 enum Ollama {
-    private struct Tags: Decodable { struct M: Decodable { let name: String }; let models: [M] }
+    struct Model: Decodable, Hashable {
+        let name: String
+        /// Satt for skymodeller. Målt 2026-09-05 på ollama 0.33 i `/api/tags`:
+        /// `gemma4:31b-cloud` har `"remote_host": "https://ollama.com:443"`,
+        /// de lokale har ikke feltet. Navnesuffikset er ikke til å stole på
+        /// (`glm-5.1:cloud` og `gemma4:31b-cloud` er begge sky).
+        let remote_host: String?
+    }
+    private struct Tags: Decodable { let models: [Model] }
 
     /// Modellene ollama har. nil = svarer ikke (5 s frist). Kort frist: dette
     /// kjøres når Innstillinger og editoren åpnes, ikke i bakgrunnen.
-    static func models(baseURL: URL) async -> [String]? {
+    static func models(baseURL: URL) async -> [Model]? {
         var req = URLRequest(url: baseURL.appending(path: "api/tags"))
         req.timeoutInterval = 5
         guard let (data, resp) = try? await URLSession.shared.data(for: req),
-              (resp as? HTTPURLResponse)?.statusCode == 200,
-              let tags = try? JSONDecoder().decode(Tags.self, from: data) else { return nil }
-        return tags.models.map(\.name).sorted()
+              (resp as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        return parse(data)
+    }
+    /// Egen funksjon så `--selfcheck` kan kjøre den mot et lagret svar.
+    static func parse(_ data: Data) -> [Model]? {
+        (try? JSONDecoder().decode(Tags.self, from: data))?.models.sorted { $0.name < $1.name }
     }
 }

@@ -86,8 +86,13 @@ private struct TranscriptionPane: View {
                 // grønt svar på noe som aldri ble sjekket.
                 .disabled(settings.checking)
                 HStack {
+                    // Låst mens en sjekk går: to samtidige ville skrevet over
+                    // hverandres prosess og resultat, og den første som ble
+                    // ferdig fjernet «Avbryt» fra den andre.
                     Button("Test backend", action: settings.runSelfcheck)
+                        .disabled(settings.checking)
                     Button("Test modelltilgang", action: settings.runAccessCheck)
+                        .disabled(settings.checking)
                     if settings.checking {
                         ProgressView().controlSize(.small)
                         Button("Avbryt") { settings.cancelCheck() }
@@ -141,7 +146,7 @@ private struct SummaryPane: View {
                 HStack {
                     if let models = settings.models {
                         Picker("Standardmodell", selection: $settings.summaryModel) {
-                            ForEach(models, id: \.self) { Text($0).tag($0) }
+                            ForEach(models, id: \.self) { Text(settings.modelLabel($0)).tag($0) }
                             // Lagret modell som ikke finnes lenger: vis den, så
                             // valget ikke stille byttes til noe annet.
                             if !settings.summaryModel.isEmpty, !models.contains(settings.summaryModel) {

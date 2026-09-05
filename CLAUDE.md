@@ -634,11 +634,24 @@ om vinduet. Det som ser vilkårlig ut i koden, og ikke er det:
 - **Stepperen er ikke en wizard.** `WorkflowStepper` viser hvor du er; bare
   ferdige og aktive steg kan trykkes, og alt de gjør er å bytte fane eller
   gå tilbake. Ingen tilstand bor i den.
-- **Inspektøren skjuler seg under 760 pt.** 620 er minimum vindusbredde,
-  inspektøren er minst 240, og under summen klemte to kolonner
-  transkripsjonen. `wantsInspector` er brukerens valg og `narrow` vinduets;
-  bindingen til `.inspector` er OG-en av dem, så et smalt vindu som blir bredt
-  igjen får inspektøren tilbake uten at brukeren må be om den.
+- **Inspektøren skjuler seg aldri av seg selv.** Den gjorde det under 760 pt
+  (620 minimum + 240 inspektør + luft), og review-runden på #47 fant det
+  hullet det er: Talere og Referat var utilgjengelige i et vindu appen selv
+  tillater, knappen var slått av og Vis-menyen gjorde ingenting. Nå står den
+  til brukeren skjuler den (knappen, ⌘⌥T); ved 620 får transkripsjonen 380
+  pt. Ikke gjeninnfør en terskel uten å gi en annen vei til de to fanene.
+- **Arbeidsflytlinja skiller tilgjengelig fra ferdig.** `reachable` er
+  stegene som kan trykkes uten å være gjort: etter transkriberingen er
+  Talere og Referat to sider av samme resultat, og uten skillet sto Talere
+  som «gjenstår» og var dødt fra Referat.
+- **Personvernløftet er avgrenset til transkriberingen.** Referatet sendes
+  til modellen som er valgt, og ollama merker skymodeller med `remote_host`
+  i `/api/tags` (målt 2026-09-05, 0.33: `gemma4:31b-cloud` →
+  `https://ollama.com:443`) — en lokal adresse beviser altså ikke lokal
+  behandling. `summaryDestination` svarer hvor det går (ekstern server
+  først, så skymodell), Referat-fanen viser det under modellvelgeren, og
+  velgerne merker skymodellene med «· sky». Navnesuffikset er ikke nok:
+  `glm-5.1:cloud` og `gemma4:31b-cloud` er begge sky.
 - **Referatets handling er en fast bunn, ikke enden av et scrollfelt.**
   `SummaryFooter` ligger utenfor `ScrollView`-en i inspektøren. Det var kjernen
   i #40: «Lag referat» forsvant under folden ved tre talere.
@@ -673,7 +686,17 @@ om vinduet. Det som ser vilkårlig ut i koden, og ikke er det:
 - **Eksportstatusen står under arbeidsflyt-linja, ikke i verktøylinja.** Målt
   2026-09-04 ved 900 pt: med «Lagret TXT som «klipp-a» i Møtereferater» som
   `ToolbarItem(.status)` ved siden av søkefeltet fløt hele verktøylinja over i
-  «»».
+  «»». **Og den har fast høyde, alltid.** Arbeidsflytlinja og statusen ligger
+  *over* visningen `.inspector` er festet på, så linja får hele vindusbredden
+  (inne i kolonnen brakk den ordene ved 700 pt: «Tran-skri-bering»). Prisen
+  er at toppen ikke kan endre høyde: da statusen dukket opp første gang sto
+  begge kolonnene forskjøvet opp under verktøylinja til neste layout-runde
+  (målt 2026-09-05), samme feil som bunnen i inspektøren. Uten status står
+  «⌘S eksporterer til «mappe»» i sporet.
+- **Stegene i arbeidsflytlinja har ikke `.accessibilityElement(children:
+  .ignore)`.** Med den sto de som `AXUnknown` uten navn i AX-treet (målt
+  2026-09-05 med System Events), altså usynlige for VoiceOver. En `Button`
+  slår barna sammen selv; `.accessibilityLabel` på den holder.
 - **Bunnen i inspektøren har fast høyde, og det er ikke pynt.** Endret
   `SummaryFooter` høyde midt i en kjøring — statusen som kom ved start, og
   «Referat lagret som …» + «Vis i Finder» ved slutt — sto *hele* vinduets
@@ -686,9 +709,10 @@ om vinduet. Det som ser vilkårlig ut i koden, og ikke er det:
   VoiceOver-annonsering, knappebyttet Stopp ↔ Lag referat,
   `Text(style: .timer)` og `.link`-knappen — alle fjernet én og én, feilen
   sto. Med konstant innhold i bunnen forsvant den; med `.frame(height:)` rundt
-  statusen er den borte med alt det andre på plass. Bredden leses av
-  `WindowWidthReader` (AppKit-observasjon på NSWindow) — den erstattet
-  GeometryReaderen underveis og ble stående fordi den er utenfor layouten.
+  statusen er den borte med alt det andre på plass. Rammen sitter nå på en
+  `ScrollView` rundt statusen, ikke på en klippet stabel: en lagringsfeil
+  med sti og servermelding trenger mer enn fire linjer, og slutten må
+  kunne nås. Høyden utenfor er like fast.
 - **`outputPath` eies av `AppSettings`.** Innstillinger → Generelt viser den,
   så den kunne ikke bo som `@State` i `ContentView` lenger.
 - **Innstillinger er en `TabView` uten fast høyde.** macOS setter tittelen
@@ -825,6 +849,12 @@ limitation, not a UI nicety. `root()` follows merge chains with a hop limit;
 - Driving the UI via System Events works, but setting a SwiftUI `TextField`'s
   AXValue directly does **not** fire the binding — click the field and
   `keystroke` instead, with delays.
+- **`click at {x, y}` fra System Events når ikke alle `.plain`-knapper.** Målt
+  2026-09-05: den traff «Åpne resultat», segmentkontrollen og
+  tidsstempel-knappene, men ikke ett eneste steg i arbeidsflytlinja — som
+  dermed så død ut. Et ekte HID-klikk (`CGEvent(mouseEventSource:mouseType:
+  .leftMouseDown …)` postet til `.cghidEventTap`, ti linjer Swift) traff. Når
+  et klikk «ikke gjør noe», send et CGEvent før du feilsøker visningen.
 - **`click menu item …` does nothing to a `MenuBarExtra` menu, and returns
   success while doing it.** `osascript` exits 0, no error, and the app never
   sees the press — a test written that way silently measures an app that was

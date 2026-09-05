@@ -19,7 +19,9 @@ enum MarkdownBlock: Equatable {
             let line = raw.trimmingCharacters(in: .whitespaces)
             if line.isEmpty {
                 if blocks.last != nil, blocks.last != .blank { blocks.append(.blank) }
-            } else if line.hasPrefix("<") {
+            } else if line.firstMatch(#"^</?aside\b"#) != nil {
+                // Bare aside-taggene, ikke alt som begynner med «<»: en
+                // autolenke som <https://…> er gyldig Markdown og skal med.
                 continue
             } else if let m = line.firstMatch(#"^(#{1,6})\s+(.*)$"#) {
                 blocks.append(.heading(m[1].count, m[2]))

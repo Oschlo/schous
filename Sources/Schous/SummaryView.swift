@@ -55,9 +55,20 @@ struct SummaryControls: View {
             }
             if let models = settings.models {
                 Picker("Modell", selection: $selection.model) {
-                    ForEach(models, id: \.self) { Text($0).tag($0) }
+                    ForEach(models, id: \.self) { Text(settings.modelLabel($0)).tag($0) }
                 }
                 .accessibilityLabel("Modell")
+                // Startbildet lover lokal transkribering; dette er stedet
+                // løftet slutter. En ekstern server eller en skymodell
+                // (videresendt fra lokal ollama) sender møtet ut av Macen.
+                if let dest = settings.summaryDestination(for: selection.model) {
+                    Label("Transkripsjon og kontekst sendes til \(dest)", systemImage: "cloud")
+                        .font(.callout).foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Label("Kjører lokalt på denne Macen", systemImage: "laptopcomputer")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
             } else {
                 Text("ollama svarer ikke på \(settings.ollamaURL) — kjør `ollama serve`.")
                     .foregroundStyle(.orange).font(.callout)
@@ -138,9 +149,14 @@ struct SummaryFooter: View {
             // 2026-09-04: Markdown-byttet, Dock-sprett/annonsering,
             // knappebyttet, Text(style: .timer) og .link-knappen var det ikke;
             // med konstant innhold i bunnen forsvant feilen.
-            VStack(alignment: .leading, spacing: 4) { status }
-                .frame(height: 64, alignment: .topLeading)
-                .clipped()
+            // Scroll, ikke klipp: en lagringsfeil med sti og servermelding
+            // trenger mer enn fire linjer, og slutten må kunne nås. Rammen
+            // er på ScrollView-en, så høyden utenfor er like fast som før.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) { status }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(height: 64)
             HStack {
                 Spacer()
                 // Begge knappene står alltid; et bytte midt i kjøringen var en
@@ -196,14 +212,20 @@ struct SummaryFooter: View {
                 }
             }
         case .done(let url):
+            // To linjer og midt-avkorting: et langt filnavn skal ikke skyve
+            // «Vis i Finder» ut av syne. Hele navnet ligger i tooltipen.
             Text("Referat lagret som \(url.lastPathComponent)")
                 .font(.callout).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(2).truncationMode(.middle)
+                .help(url.lastPathComponent)
+                .textSelection(.enabled)
             Button("Vis i Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
                 .buttonStyle(.link)
         case .failed(let msg):
             Text(msg).font(.callout).foregroundStyle(.red)
                 .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+                .help(msg)
         case .idle:
             EmptyView()
         }

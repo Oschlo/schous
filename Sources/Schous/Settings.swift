@@ -199,11 +199,30 @@ final class AppSettings: ObservableObject {
     @Published var summaryPrompt: String { didSet { UserDefaults.standard.set(summaryPrompt, forKey: "summaryPrompt") } }
     /// Modellene ollama svarte med. nil før første henting, og når den ikke svarer.
     @Published var models: [String]?
+    /// De av dem som er skymodeller: lokal ollama videresender dem til
+    /// ollama.com, så en lokal adresse beviser ikke lokal behandling.
+    @Published var remoteModels: Set<String> = []
 
     var ollamaBaseURL: URL { URL(string: ollamaURL) ?? URL(string: "http://localhost:11434")! }
 
+    /// Hvor transkripsjonen og konteksten faktisk sendes. nil = denne Macen.
+    func summaryDestination(for model: String) -> String? {
+        Self.summaryDestination(baseURL: ollamaBaseURL, model: model, remote: remoteModels)
+    }
+    /// Ekstern server først: da går alt dit uansett modell. Ellers skymodell
+    /// → ollama.com. Statisk så `--selfcheck` kan kjøre den uten brukerens tall.
+    nonisolated static func summaryDestination(baseURL: URL, model: String, remote: Set<String>) -> String? {
+        let host = baseURL.host() ?? "localhost"
+        if !["localhost", "127.0.0.1", "::1"].contains(host) { return host }
+        return remote.contains(model) ? "ollama.com" : nil
+    }
+    /// Navnet i modellvelgerne, merket når det ikke er lokalt.
+    func modelLabel(_ name: String) -> String { remoteModels.contains(name) ? "\(name) · sky" : name }
+
     func refreshModels() async {
-        models = await Ollama.models(baseURL: ollamaBaseURL)
+        let list = await Ollama.models(baseURL: ollamaBaseURL)
+        models = list?.map(\.name)
+        remoteModels = Set(list?.filter { $0.remote_host != nil }.map(\.name) ?? [])
         // Første gang: velg noe, så editoren ikke står med tom modell.
         if summaryModel.isEmpty, let first = models?.first { summaryModel = first }
     }
@@ -252,6 +271,8 @@ final class AppSettings: ObservableObject {
     }
 
     private func run(_ args: [String], expect: String, timeout: TimeInterval) {
+        // Én om gangen. Knappene er låst imens, men dette er der det avgjøres.
+        guard !checking else { return }
         guard let backend = backendURL, let py = pythonURL else {
             checkResult = "Velg backend-mappen først."
             return

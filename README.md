@@ -202,8 +202,10 @@ Finished steps can be clicked to go back.
    timestamp copies it), and the inspector on the right has two tabs.
    **Talere** names the speakers and merges IDs that are the same person;
    **Referat** makes the summary. **Eksporter** (⌘S) writes the files. The
-   inspector hides itself when the window is narrower than 760 pt; ⌘⌥T or the
-   toolbar button toggles it otherwise.
+   inspector stays until you hide it with ⌘⌥T or the toolbar button. The
+   **Referat** tab says where the summary goes: a cloud model or a remote
+   Ollama server means the transcript leaves your Mac, a local model means it
+   does not.
 
 If the app is in the background when a transcription or summary finishes, the
 Dock icon bounces once, and VoiceOver announces it.
