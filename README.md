@@ -180,7 +180,9 @@ Two buttons check the two halves — the install and the token:
 
 The window walks through four steps — **Fil · Transkribering · Talere ·
 Referat og eksport** — and a line at the top shows which one you are on.
-Finished steps can be clicked to go back.
+Finished steps can be clicked to go back, and once the transcription is done
+**Talere** and **Referat** are two sides of the same result: click either one
+to switch.
 
 1. Drop an audio or video file anywhere in the window, or pick one with
    **Velg fil…** (⌘O). Schous is also listed under **Open With** in Finder, and
@@ -251,6 +253,17 @@ summary into the window and writes it next to the transcript as
 `<file>.<template>.md`. When it is done, the summary is rendered (headings,
 lists, checkboxes); **Kopier referat** in the toolbar copies the Markdown.
 
+![The Referat tab: title, template, model, language and context; under the
+model picker a line says where the transcript is sent, here a cloud model
+forwarded to ollama.com](docs/summary.png)
+
+The line under the model picker is the privacy signal. Transcription never
+leaves the Mac, but the summary goes wherever the chosen model runs: a local
+model says «Kjører lokalt på denne Macen»; a cloud model (ollama marks them
+with `remote_host`, the picker with «· sky») says the transcript and context
+are sent to ollama.com; a remote ollama server says they are sent to that
+host, whatever the model.
+
 While the model is reading the transcript nothing arrives from ollama, so the
 status says so — «Modellen leser transkripsjonen (7 716 ord) · tar vanligvis
 ca. 5 min på denne maskinen» — with the estimate taken from the previous run
@@ -262,8 +275,9 @@ file name is the template name. Three are installed on first use (Customer
 Call, Discovery interview, Stand-Up); edit them or add your own. The prompt
 that wraps the template is editable in Settings.
 
-Requires [ollama](https://ollama.com) running locally with at least one model
-pulled. Settings lists the models it finds. A transcript of an hour-long
+Requires [ollama](https://ollama.com) with at least one model pulled — on this
+Mac by default, or on another machine if you change the URL in Settings.
+Settings lists the models it finds. A transcript of an hour-long
 meeting is a single call — no chunking. Measured on an 8.8k-word transcript
 (~18k tokens) with `qwen3.8:27b-mlx` on an M5: on a cold model about two
 minutes pass before the first word, because the model has to load and read the
