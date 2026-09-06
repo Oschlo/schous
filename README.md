@@ -7,8 +7,9 @@ Drop in a file — or record system audio straight from the menu bar — pick wh
 the result goes, watch the progress, and name the speakers afterwards. SwiftUI,
 no third-party dependencies, no Xcode.
 
-![The speaker editor: transcript on the left with names applied, speaker list on
-the right where IDs are renamed and merged](docs/speakers.png)
+![The speaker editor: the transcript as a document on the left, with the
+workflow line above it; on the right the inspector's Talere tab, where each
+speaker ID gets a name and a merge menu](docs/speakers.png)
 
 The name comes from Schous plass in Oslo. Since that gives away nothing about
 what the app does, `bundle.sh` puts Spotlight keywords on the bundle — searching
@@ -155,9 +156,16 @@ helps. If you do relocate `HF_HOME` for the model cache, the token ends up in
 two places, and that is the price of the app behaving the same from Finder as
 from a shell.
 
-Then, in the app — open Settings (⌘,) and point **Backend** at the folder holding
-`transcribe.py` and `.venv/`. That is the only thing to fill in; the token lives
-in `huggingface_hub`, above.
+Then, in the app — open Settings (⌘,), the **Transkribering** pane, and point
+**Backend** at the folder holding `transcribe.py` and `.venv/`. That is the
+only thing to fill in; the token lives in `huggingface_hub`, above. The
+window's empty state says **Fullfør oppsett** until this is done, and
+**Backend klar** afterwards.
+
+Settings has four panes: **Generelt** (output folder, export formats),
+**Transkribering** (backend and the two checks), **Referat** (ollama, default
+model and language, templates) and **Avansert** (the model instruction and the
+Hugging Face commands, each with a copy button).
 
 Two buttons check the two halves — the install and the token:
 
@@ -170,52 +178,96 @@ Two buttons check the two halves — the install and the token:
 
 ## Use
 
+The window walks through four steps — **Fil · Transkribering · Talere ·
+Referat og eksport** — and a line at the top shows which one you are on.
+Finished steps can be clicked to go back, and once the transcription is done
+**Talere** and **Referat** are two sides of the same result: click either one
+to switch.
+
 1. Drop an audio or video file anywhere in the window, or pick one with
    **Velg fil…** (⌘O). Schous is also listed under **Open With** in Finder, and
-   a file dropped on the Dock icon opens the same way.
-2. Choose the output folder. Give the speaker count if you know it (blank = automatic).
-3. **Start transkribering.** Progress shows steps 1–4, with a segment counter in
-   step 4 and per-substep progress in step 2.
+   a file dropped on the Dock icon opens the same way. Before a file is
+   chosen, the window says whether the backend and the models are ready.
+2. Choose the output folder (the full path is in the tooltip, **Vis i Finder**
+   opens it) and the number of speakers — **Automatisk** unless you know it.
+3. **Start transkribering.** The running job is the whole window: the four
+   steps (**Forbereder lyd → Finner talere → Finner språk → Transkriberer**),
+   what is happening right now, progress, and an estimate of the time left —
+   in step 4 from the segment count, in the other steps from how long they
+   took last time on this machine. **Detaljer** folds out the backend's own
+   log. If you already transcribed the file, **Åpne resultat** is the blue
+   button instead and **Transkriber på nytt…** the secondary one.
 4. **Pause** freezes the process (SIGSTOP) and keeps the models in memory.
    **Stopp** ends it — the segments transcribed so far are written out, and
    starting again continues where it left off.
-5. When it finishes: name the speakers, merge IDs that are the same person, and
-   **Lagre** (⌘S). Speakers and the summary controls sit in an inspector on the
-   right; the toolbar button (or ⌘⌥T) hides and shows it. **Vis i Finder**
-   appears next to the save status.
+5. When it finishes: the transcript is a document (⌘F searches it, clicking a
+   timestamp copies it), and the inspector on the right has two tabs.
+   **Talere** names the speakers and merges IDs that are the same person;
+   **Referat** makes the summary. **Eksporter** (⌘S) writes the files. The
+   inspector stays until you hide it with ⌘⌥T or the toolbar button. The
+   **Referat** tab says where the summary goes: a cloud model or a remote
+   Ollama server means the transcript leaves your Mac, a local model means it
+   does not.
 
 If the app is in the background when a transcription or summary finishes, the
-Dock icon bounces once.
+Dock icon bounces once, and VoiceOver announces it.
 
 ### Keyboard shortcuts
 
 | Action | Shortcut |
 |---|---|
 | Open a file | ⌘O |
-| Start transcription | ⌘↩ |
+| Start transcription / open result | ⌘↩ |
 | Pause / resume | ⌘⇧P |
 | Stop | ⌘. |
-| Save | ⌘S |
+| Export | ⌘S |
+| Search the transcript | ⌘F |
 | Back to setup | ⌘↑ |
-| Show / hide speakers | ⌘⌥T |
+| Show / hide the inspector | ⌘⌥T |
 | Make summary | ⌘⇧R |
 | Start / stop recording, from any app | ⌃⌥R |
 | Settings | ⌘, |
 
-![Step 4 of 4: a progress bar, a segment counter, an estimate of the time left,
-and the speaker and language of the segment being transcribed](docs/progress.png)
+![A running job as the main content: the four steps with «Finner talere»
+active, the current sub-step, a progress bar, «50 % · under ett minutt igjen»
+estimated from the previous run, and Pause and Stopp right below](docs/progress.png)
 
 Writes `<name>.txt`, `<name>.srt` and `<name>.json` to the folder you chose —
 or whichever of those you ticked under **Eksportformater** in Settings. The
-arrow beside **Lagre** writes a single format without changing that default.
+arrow beside **Eksporter** writes a single format without changing that
+default.
+
+`<name>` is the source file's name — `Opptak-2026-09-03-1159` for a menu-bar
+recording, which says nothing about the meeting. Give it a **Tittel** in the
+Referat tab and the files become `2026-09-03 <title>.txt` and so on: date
+first so Finder sorts them, title so you can tell them apart. The date is the
+source file's creation date. The title is remembered per job.
 
 ## Meeting summary
 
-Once the speakers are named, pick a template, a model and a language in the
-**Referat** section under the speaker list; optionally add context (who was
-in the room, what the meeting was about). **Lag referat** saves the
-transcript first, then streams the summary into the window and writes it
-next to the transcript as `<file>.<template>.md`.
+Once the speakers are named, switch the inspector to **Referat** and pick a
+template, a model and a language; optionally add a title and context (who was
+in the room, what the meeting was about). **Lag referat** — always visible at
+the bottom of the inspector — saves the transcript first, then streams the
+summary into the window and writes it next to the transcript as
+`<file>.<template>.md`. When it is done, the summary is rendered (headings,
+lists, checkboxes); **Kopier referat** in the toolbar copies the Markdown.
+
+![The Referat tab: title, template, model, language and context; under the
+model picker a line says where the transcript is sent, here a cloud model
+forwarded to ollama.com](docs/summary.png)
+
+The line under the model picker is the privacy signal. Transcription never
+leaves the Mac, but the summary goes wherever the chosen model runs: a local
+model says «Kjører lokalt på denne Macen»; a cloud model (ollama marks them
+with `remote_host`, the picker with «· sky») says the transcript and context
+are sent to ollama.com; a remote ollama server says they are sent to that
+host, whatever the model.
+
+While the model is reading the transcript nothing arrives from ollama, so the
+status says so — «Modellen leser transkripsjonen (7 716 ord) · tar vanligvis
+ca. 5 min på denne maskinen» — with the estimate taken from the previous run
+of the same model. Once tokens arrive it changes to «Skriver referat …».
 
 Templates are Markdown files in
 `~/Library/Application Support/Schous/templates/` — one file per template, the
@@ -223,8 +275,9 @@ file name is the template name. Three are installed on first use (Customer
 Call, Discovery interview, Stand-Up); edit them or add your own. The prompt
 that wraps the template is editable in Settings.
 
-Requires [ollama](https://ollama.com) running locally with at least one model
-pulled. Settings lists the models it finds. A transcript of an hour-long
+Requires [ollama](https://ollama.com) with at least one model pulled — on this
+Mac by default, or on another machine if you change the URL in Settings.
+Settings lists the models it finds. A transcript of an hour-long
 meeting is a single call — no chunking. Measured on an 8.8k-word transcript
 (~18k tokens) with `qwen3.8:27b-mlx` on an M5: on a cold model about two
 minutes pass before the first word, because the model has to load and read the

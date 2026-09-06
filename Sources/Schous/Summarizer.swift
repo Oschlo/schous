@@ -89,9 +89,10 @@ enum Templates {
 
     static func name(_ url: URL) -> String { url.deletingPathExtension().lastPathComponent }
 
-    /// «Customer Call» → «customer-call». Brukes i filnavnet på referatet.
+    /// «Customer Call» → «customer-call». Brukes i filnavnet på referatet,
+    /// så «/» og «:» må ut først (#42).
     static func slug(_ name: String) -> String {
-        name.lowercased().replacingOccurrences(of: " ", with: "-")
+        filenameSafe(name).lowercased().replacingOccurrences(of: " ", with: "-")
     }
 }
 
@@ -99,16 +100,29 @@ enum Templates {
 @MainActor
 final class Summarizer: ObservableObject {
     enum State: Equatable { case idle, running, done(URL), failed(String) }
+    /// Hvor i kjøringen vi er (#39). ollama sender ingenting under lasting og
+    /// prefill, så «venter» er alt som kan sies der — med et anslag fra
+    /// forrige kjøring på samme modell når det finnes.
+    enum Phase: Equatable { case idle, waiting(estimate: TimeInterval?), streaming }
 
     @Published var text = ""
     @Published var state: State = .idle
     @Published var started: Date?
+    @Published private(set) var phase: Phase = .idle
+    /// Ord i prompten, til «Modellen leser transkripsjonen (7 716 ord)».
+    @Published private(set) var promptWords = 0
+    /// Hvor ratene lagres. Injiserbar så selfcheck ikke rører brukerens tall.
+    var estimateStore: UserDefaults = .standard
 
     /// Én linje fra strømmen. `thinking` leses ikke: det er ikke referat.
     struct Chunk: Equatable {
         let content: String
         let done: Bool
         let promptEvalCount: Int?
+        /// Fra sluttobjektet, i sekunder (ollama teller nanosekunder). Det er
+        /// disse som blir anslaget neste gang samme modell brukes.
+        let loadSeconds: Double?
+        let promptEvalSeconds: Double?
         /// ollama sender feilen som egen NDJSON-linje midt i en 200-strøm når
         /// runneren dør. Leses her, ikke bare i 404-grenen.
         let error: String?
@@ -118,6 +132,8 @@ final class Summarizer: ObservableObject {
         var message: Message?
         var done: Bool?
         var prompt_eval_count: Int?
+        var load_duration: Int64?
+        var prompt_eval_duration: Int64?
         var error: String?
     }
 
@@ -125,7 +141,10 @@ final class Summarizer: ObservableObject {
         guard let data = line.data(using: .utf8),
               let l = try? JSONDecoder().decode(Line.self, from: data) else { return nil }
         return Chunk(content: l.message?.content ?? "", done: l.done ?? false,
-                     promptEvalCount: l.prompt_eval_count, error: l.error)
+                     promptEvalCount: l.prompt_eval_count,
+                     loadSeconds: l.load_duration.map { Double($0) / 1e9 },
+                     promptEvalSeconds: l.prompt_eval_duration.map { Double($0) / 1e9 },
+                     error: l.error)
     }
 
     private let session: URLSession
@@ -155,8 +174,14 @@ final class Summarizer: ObservableObject {
         text = ""
         state = .running
         started = Date()
+        promptWords = prompt.split(whereSeparator: \.isWhitespace).count
+        phase = .waiting(estimate: Estimates.summaryEstimate(model: model, promptChars: prompt.utf8.count,
+                                                             in: estimateStore))
         task = Task { [weak self] in
             guard let self else { return }
+            // Ikke etter cancel(): run() har alt satt fasen for neste kjøring,
+            // og den gamle Task-ens avslutning skal ikke viske den ut.
+            defer { if !Task.isCancelled { self.phase = .idle } }
             do {
                 try await self.stream(prompt: prompt, model: model, baseURL: baseURL)
                 guard !Task.isCancelled else { return }
@@ -186,6 +211,7 @@ final class Summarizer: ObservableObject {
         task?.cancel()
         task = nil
         if state == .running { state = .idle }
+        phase = .idle
     }
 
     private struct HTTPError: Error, LocalizedError {
@@ -230,6 +256,7 @@ final class Summarizer: ObservableObject {
         for try await line in bytes.lines {
             guard let chunk = Self.parse(line) else { continue }
             if let err = chunk.error { throw StreamError(reason: "ollama avbrøt: \(err)") }
+            if !chunk.content.isEmpty, phase != .streaming { phase = .streaming }
             pending += chunk.content
             let now = Date()
             if chunk.done || now.timeIntervalSince(lastFlush) >= 0.1 {
@@ -239,6 +266,10 @@ final class Summarizer: ObservableObject {
             }
             if chunk.done {
                 if let n = chunk.promptEvalCount { NSLog("Schous referat: prompt_eval_count=%d", n) }
+                if let load = chunk.loadSeconds, let eval = chunk.promptEvalSeconds {
+                    Estimates.recordSummary(model: model, loadSeconds: load, promptSeconds: eval,
+                                            promptChars: prompt.utf8.count, in: estimateStore)
+                }
                 return
             }
         }
@@ -274,16 +305,27 @@ final class Summarizer: ObservableObject {
 }
 
 enum Ollama {
-    private struct Tags: Decodable { struct M: Decodable { let name: String }; let models: [M] }
+    struct Model: Decodable, Hashable {
+        let name: String
+        /// Satt for skymodeller. Målt 2026-09-05 på ollama 0.33 i `/api/tags`:
+        /// `gemma4:31b-cloud` har `"remote_host": "https://ollama.com:443"`,
+        /// de lokale har ikke feltet. Navnesuffikset er ikke til å stole på
+        /// (`glm-5.1:cloud` og `gemma4:31b-cloud` er begge sky).
+        let remote_host: String?
+    }
+    private struct Tags: Decodable { let models: [Model] }
 
     /// Modellene ollama har. nil = svarer ikke (5 s frist). Kort frist: dette
     /// kjøres når Innstillinger og editoren åpnes, ikke i bakgrunnen.
-    static func models(baseURL: URL) async -> [String]? {
+    static func models(baseURL: URL) async -> [Model]? {
         var req = URLRequest(url: baseURL.appending(path: "api/tags"))
         req.timeoutInterval = 5
         guard let (data, resp) = try? await URLSession.shared.data(for: req),
-              (resp as? HTTPURLResponse)?.statusCode == 200,
-              let tags = try? JSONDecoder().decode(Tags.self, from: data) else { return nil }
-        return tags.models.map(\.name).sorted()
+              (resp as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        return parse(data)
+    }
+    /// Egen funksjon så `--selfcheck` kan kjøre den mot et lagret svar.
+    static func parse(_ data: Data) -> [Model]? {
+        (try? JSONDecoder().decode(Tags.self, from: data))?.models.sorted { $0.name < $1.name }
     }
 }

@@ -72,6 +72,30 @@ func writeOutputs(_ segs: [Segment], to dir: URL, base: String, names: [String: 
     return written
 }
 
+/// Søket i editoren (⌘F). Tom query treffer alt; ellers ufølsomt for store
+/// bokstaver og diakritika, så «motet» finner «Møtet».
+func matches(_ s: Segment, query: String) -> Bool {
+    let q = query.trimmingCharacters(in: .whitespaces)
+    return q.isEmpty || s.text.range(of: q, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+}
+
+/// «/» og «:» ut av et navn som skal bli filnavn. Ikke mer: alt annet er
+/// lov på APFS, og en tittel skal kjennes igjen i Finder.
+func filenameSafe(_ s: String) -> String {
+    s.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+/// Navnet på utdatafilene (#42): dato først gir riktig sortering i Finder,
+/// tittelen sier hva møtet var. Tom tittel gir kildefilas navn, som før.
+func outputBase(title: String, date: Date, fallback: String) -> String {
+    let t = filenameSafe(title)
+    guard !t.isEmpty else { return fallback }
+    let f = DateFormatter()
+    f.dateFormat = "yyyy-MM-dd"
+    return "\(f.string(from: date)) \(t)"
+}
+
 /// Speiler backendens _selfcheck (transcribe.py:174-181). Kalles ved oppstart i debug.
 func segmentSelfcheck() {
     assert(ts(3661.5) == "01:01:01,500", ts(3661.5))

@@ -11,6 +11,8 @@ func runSelfcheckAndExit() -> Never {
     updateSelfcheck()
     summarizerSelfcheck()
     summarizerNetworkSelfcheck()
+    estimatesSelfcheck()
+    documentSelfcheck()
 
     let job = TranscriptionJob()
 
@@ -33,10 +35,14 @@ func runSelfcheckAndExit() -> Never {
 
     job.parseStdout(#"{"event": "step", "step": 3, "name": "språk per taler"}"#)
     job.parseStdout(#"{"event": "language", "completed": 1, "total": 3, "speaker": "SPEAKER_00", "language": "sv"}"#)
-    check(job.step == 3 && job.detail == "taler 1/3 — SPEAKER_00: sv", "steg 3: \(job.detail)")
+    check(job.step == 3 && job.detail == "taler 1 av 3 · SPEAKER_00: sv", "steg 3: \(job.detail)")
 
     job.parseStdout(#"{"event": "step", "step": 4, "name": "transkriberer"}"#)
     check(job.step == 4, "steg 4, fikk \(job.step)")
+    // Navnet i UI sier hva brukeren får; backendens ord står i Detaljer.
+    check(TranscriptionJob.stepNames[2] == "Finner talere" && job.stepLabel == "Transkriberer",
+          "stegnavn på norsk: \(job.stepLabel)")
+    check(TranscriptionJob.technicalNames[2] == "diarization", "teknisk navn til Detaljer")
 
     job.parseStdout(#"{"event": "progress", "step": 4, "completed": 214, "total": 509, "speaker": "SPEAKER_00", "language": "no"}"#)
     check(job.done == 214 && job.total == 509, "steg 4: \(job.done)/\(job.total)")
@@ -143,6 +149,18 @@ func runSelfcheckAndExit() -> Never {
     check(hung.hasPrefix("Ga opp etter 1 s"), "frist ga ikke opp: \(hung.prefix(60))")
     check(hangElapsed < 3, "frist brukte \(hangElapsed) s — drepte ikke prosessen")
 
+    // Avbryt: en sjekk som står og venter må kunne stoppes fra knappen, ikke
+    // bare av fristen. Samme kontroll som over — /bin/sleep overlever alt
+    // annet enn å bli drept.
+    final class Box: @unchecked Sendable { var p: Process? }
+    let box = Box()
+    let cancelStart = Date()
+    DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) { box.p?.terminate() }
+    let cancelled = AppSettings.capture(URL(fileURLWithPath: "/bin/sleep"), args: ["5"],
+                                        cwd: URL.temporaryDirectory, timeout: 10) { box.p = $0 }
+    check(Date().timeIntervalSince(cancelStart) < 3, "avbrudd drepte ikke prosessen")
+    check(cancelled.hasPrefix("Prosessen ble drept"), "avbrudd: \(cancelled.prefix(40))")
+
     // Og den må ikke slå til på noe som svarer i tide, ellers er den bare en
     // ny måte å feile på.
     let quick = AppSettings.capture(URL(fileURLWithPath: "/bin/echo"), args: ["hei"],
@@ -180,6 +198,9 @@ func runSelfcheckAndExit() -> Never {
     loaded.loadFinished(input: fakeInput)
     check(loaded.state == .done && loaded.segments.count == 1 && loaded.base == "selfcheck-input",
           "loadFinished: \(loaded.state) \(loaded.segments.count) \(loaded.base)")
+    let info = TranscriptionJob.finishedInfo(for: fakeInput)
+    check(info?.segments == 1 && info.map { Date().timeIntervalSince($0.modified) < 60 } == true,
+          "finishedInfo: \(String(describing: info))")
     try? FileManager.default.removeItem(at: fakeJob)
 
     let srt = try! String(contentsOf: dir.appending(path: "t.srt"), encoding: .utf8)
@@ -405,6 +426,85 @@ private func ≈ (a: [Float], b: [Float]) -> Bool {
     a.count == b.count && zip(a, b).allSatisfy { abs($0 - $1) < 1e-6 }
 }
 
+/// Dokumentet: søk (⌘F), Markdown-rendering (#41) og filnavn med tittel (#42).
+private func documentSelfcheck() {
+    let seg = Segment(start: 1, end: 2, speaker: "SPEAKER_00", language: "no", text: "Møtet begynte på tirsdag.")
+    check(matches(seg, query: ""), "tom query treffer alt")
+    check(matches(seg, query: "MØTET"), "søket er ufølsomt for store bokstaver")
+    // «å» er a + ring og normaliseres; «ø» er en egen bokstav og gjør det ikke.
+    check(matches(seg, query: "pa tirsdag"), "søket er ufølsomt for diakritika")
+    check(!matches(seg, query: "onsdag"), "ikke-treff skal ikke treffe")
+
+    // Det malene faktisk produserer. <aside> fra Notion-eksporten hoppes over,
+    // og en avsluttende tomlinje blir ikke en .blank.
+    // Bare aside-taggene: en autolenke begynner også med «<» og skal med.
+    let md = "# Tittel\n\n## Del\n- punkt\n- [ ] åpen\n- [x] gjort\n1. første\nVanlig **fet** tekst\n"
+        + "<aside>\nhopp\n</aside>\n<https://example.com>\n"
+    let blocks = MarkdownBlock.parse(md)
+    check(blocks == [.heading(1, "Tittel"), .blank, .heading(2, "Del"), .bullet("punkt"), .task(false, "åpen"),
+                     .task(true, "gjort"), .numbered(1, "første"), .paragraph("Vanlig **fet** tekst"),
+                     .paragraph("hopp"), .paragraph("<https://example.com>")],
+          "markdown-blokker: \(blocks)")
+
+    // Hvor referatet går. Svaret er ollama 0.33 sitt eget, med og uten
+    // remote_host; navnet alene skiller ikke sky fra lokalt.
+    let tags = Data("""
+    {"models":[{"name":"gemma4:31b-cloud","remote_model":"gemma4:31b","remote_host":"https://ollama.com:443"},
+               {"name":"ministral-3:latest","size":6022236616}]}
+    """.utf8)
+    let parsed = Ollama.parse(tags) ?? []
+    let remote = Set(parsed.filter { $0.remote_host != nil }.map(\.name))
+    check(parsed.map(\.name) == ["gemma4:31b-cloud", "ministral-3:latest"] && remote == ["gemma4:31b-cloud"],
+          "ollama-modeller: \(parsed)")
+    let local = URL(string: "http://localhost:11434")!
+    check(AppSettings.summaryDestination(baseURL: local, model: "ministral-3:latest", remote: remote) == nil,
+          "lokal modell på lokal ollama er lokal")
+    check(AppSettings.summaryDestination(baseURL: local, model: "gemma4:31b-cloud", remote: remote) == "ollama.com",
+          "skymodell på lokal ollama går til ollama.com")
+    check(AppSettings.summaryDestination(baseURL: URL(string: "http://10.0.0.5:11434")!,
+                                         model: "ministral-3:latest", remote: remote) == "10.0.0.5",
+          "ekstern server går dit uansett modell")
+    check(MarkdownBlock.parse("").isEmpty && MarkdownBlock.parse("\n\n").isEmpty, "tomt dokument gir ingen blokker")
+
+    check(filenameSafe("Coast: intro / AI") == "Coast- intro - AI", filenameSafe("Coast: intro / AI"))
+    check(filenameSafe("  ") == "", "bare mellomrom er tomt")
+    var comps = DateComponents(year: 2026, month: 9, day: 3, hour: 12)
+    comps.timeZone = .current
+    let d = Calendar(identifier: .gregorian).date(from: comps)!
+    check(outputBase(title: "Coast intro om AI-strategi", date: d, fallback: "Opptak-x") == "2026-09-03 Coast intro om AI-strategi",
+          outputBase(title: "Coast intro om AI-strategi", date: d, fallback: "Opptak-x"))
+    check(outputBase(title: " ", date: d, fallback: "Opptak-x") == "Opptak-x", "tom tittel = kildefilas navn")
+}
+
+/// Estimatene i #39: rater fra forrige kjøring, i en egen defaults-suite så
+/// selfcheck aldri rører brukerens tall.
+private func estimatesSelfcheck() {
+    let suite = "co.oschlo.schous.selfcheck-\(getpid())"
+    let d = UserDefaults(suiteName: suite)!
+    defer { d.removePersistentDomain(forName: suite) }
+    check(Estimates.stepEstimate(2, audioSeconds: 600, in: d) == nil, "uten historikk skal steg-estimatet være nil")
+    // 10 min lyd tok 4 min i steg 2 → 0,4 s per lydsekund → 20 min lyd anslås til 8 min.
+    Estimates.recordStep(2, seconds: 240, audioSeconds: 600, in: d)
+    check(Estimates.stepEstimate(2, audioSeconds: 1200, in: d).map { abs($0 - 480) < 1e-6 } == true,
+          "steg-estimat: \(String(describing: Estimates.stepEstimate(2, audioSeconds: 1200, in: d)))")
+    check(Estimates.stepEstimate(4, audioSeconds: 1200, in: d) == nil, "steg 4 har ingen historikk ennå")
+    // Uten lydlengde finnes ingen rate å lagre.
+    Estimates.recordStep(3, seconds: 5, audioSeconds: 0, in: d)
+    check(Estimates.stepEstimate(3, audioSeconds: 100, in: d) == nil, "rate uten lydlengde skal ikke lagres")
+
+    check(Estimates.summaryEstimate(model: "m", promptChars: 1000, in: d) == nil,
+          "uten historikk skal referat-estimatet være nil")
+    // 11 s lasting + 297 s prefill på 40 000 tegn (målt i #39) → 20 000 tegn anslås til 11 + 148,5.
+    Estimates.recordSummary(model: "m", loadSeconds: 11, promptSeconds: 297, promptChars: 40_000, in: d)
+    check(Estimates.summaryEstimate(model: "m", promptChars: 20_000, in: d).map { abs($0 - 159.5) < 1e-6 } == true,
+          "referat-estimat: \(String(describing: Estimates.summaryEstimate(model: "m", promptChars: 20_000, in: d)))")
+    check(Estimates.summaryEstimate(model: "annen", promptChars: 20_000, in: d) == nil, "raten er per modell")
+
+    check(Estimates.describe(20) == "under ett minutt", Estimates.describe(20))
+    check(Estimates.describe(200) == "ca. 3 min", Estimates.describe(200))
+    check(Estimates.describe(4200) == "ca. 1 t 10 min", Estimates.describe(4200))
+}
+
 /// Referat: plassholdere, slug og seeding. Selve nettkallet testes i
 /// summarizerNetworkSelfcheck mot en ekte socket.
 @MainActor
@@ -432,6 +532,7 @@ private func summarizerSelfcheck() {
     check(Templates.slug("Customer Call") == "customer-call", "slug: \(Templates.slug("Customer Call"))")
     check(Templates.slug("Stand-Up") == "stand-up", "slug: \(Templates.slug("Stand-Up"))")
     check(Templates.slug("Discovery interview") == "discovery-interview", "slug med små bokstaver")
+    check(Templates.slug("A/B: test") == "a-b--test", "slug med tegn som ikke kan stå i filnavn: \(Templates.slug("A/B: test"))")
 
     // Seeding: kopierer bare når mappa ikke finnes. En tom mappe er et valg.
     let root = URL.temporaryDirectory.appending(path: "schous-templates-\(getpid())")
@@ -464,6 +565,10 @@ private func summarizerNetworkSelfcheck() {
     check(c?.content == "hei" && c?.done == false, "content-bit: \(String(describing: c))")
     let d = Summarizer.parse(done)
     check(d?.done == true && d?.promptEvalCount == 16, "sluttobjekt: \(String(describing: d))")
+    // Varighetene i sluttobjektet er nanosekunder; det er dem anslaget bygger på (#39).
+    check(d?.loadSeconds.map { abs($0 - 6.040992125) < 1e-9 } == true
+          && d?.promptEvalSeconds.map { abs($0 - 0.68357225) < 1e-9 } == true,
+          "varigheter fra sluttobjektet: \(String(describing: d))")
     check(Summarizer.parse("ikke json") == nil, "støy skal gi nil, ikke krasj")
 
     // Klienten mot en ekte prosess. Én forbindelse per nc; hvert tilfelle får
@@ -476,9 +581,19 @@ private func summarizerNetworkSelfcheck() {
     //    på det som gikk over ledningen, ikke bare det klienten mente å sende.
     let reqFile = URL.temporaryDirectory.appending(path: "schous-req-\(getpid()).txt")
     defer { try? FileManager.default.removeItem(at: reqFile) }
-    var s = summarize(port: 11501, response: http(200, [thinking, content, done]), out: out, reqFile: reqFile)
+    let suite = "co.oschlo.schous.selfcheck-summary-\(getpid())"
+    let store = UserDefaults(suiteName: suite)!
+    defer { store.removePersistentDomain(forName: suite) }
+    let s1 = Summarizer(timeout: 10)
+    s1.estimateStore = store
+    var s = summarize(port: 11501, response: http(200, [thinking, content, done]), out: out, reqFile: reqFile,
+                      summarizer: s1)
     check(s.text == "hei", "strøm: \(s.text.debugDescription) state=\(s.state)")
     check(s.state == .done(out), "strøm-state: \(s.state)")
+    check(s.phase == .idle, "fase etter ferdig: \(s.phase)")
+    // Neste kjøring mot samme modell har et anslag: 6,04 s lasting + 0,68 s på promptens ene tegn.
+    check(Estimates.summaryEstimate(model: "m", promptChars: 1, in: store).map { abs($0 - 6.724564375) < 1e-6 } == true,
+          "raten ble ikke lagret: \(String(describing: Estimates.summaryEstimate(model: "m", promptChars: 1, in: store)))")
     check((try? String(contentsOf: out, encoding: .utf8)) == "hei", "fila ble ikke skrevet")
     check((try? String(contentsOf: reqFile, encoding: .utf8))?.contains(#""think":false"#) == true,
           "think:false gikk ikke over ledningen")
@@ -517,9 +632,16 @@ private func summarizerNetworkSelfcheck() {
     defer { try? FileManager.default.removeItem(at: outCancel) }
     let server6 = startServer(port: 11506, response: http(200, [content]), hold: 10, reqFile: nil)
     let s6 = Summarizer(timeout: 10)
-    s6.run(prompt: "p", model: "m", baseURL: URL(string: "http://127.0.0.1:11506")!, writeTo: [outCancel])
-    RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+    s6.estimateStore = store
+    s6.run(prompt: "p q r", model: "m", baseURL: URL(string: "http://127.0.0.1:11506")!, writeTo: [outCancel])
+    // Før noe er kommet: venter, med anslaget fra kjøring 1, og ordtallet fra prompten.
+    check({ if case .waiting(let e) = s6.phase { return e != nil }; return false }(), "fase før første pakke: \(s6.phase)")
+    check(s6.promptWords == 3, "ordtall: \(s6.promptWords)")
+    RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+    // Én content-bit er kommet: strømmer.
+    check(s6.phase == .streaming, "fase etter første pakke: \(s6.phase)")
     s6.cancel()
+    check(s6.phase == .idle, "fase etter avbrudd: \(s6.phase)")
     // Sjekkes uten å pumpe RunLoop igjen: cancel() skal sette .idle synkront,
     // ikke overlate det til den kansellerte Task-ens catch-gren, som først får
     // kjøre neste gang MainActor-køen tømmes.

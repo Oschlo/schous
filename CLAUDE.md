@@ -622,6 +622,138 @@ falls back to an SF Symbol. Edit the sprite in `icon.py` and both icons rebuild.
 It runs on the real-time thread, which is why it takes an `AudioBufferList`
 rather than arrays. `--selfcheck` covers it.
 
+## Vinduet: fire tilstander, én inspektør
+
+Designgjennomgangen i [#40](https://github.com/Oschlo/schous/issues/40) la
+om vinduet. Det som ser vilkårlig ut i koden, og ikke er det:
+
+- **`ContentView` velger, `SetupViews.swift` viser.** Tom → `EmptyStateView`,
+  fil valgt → `JobSetupView`, kjører → `JobProgressView`, ferdig →
+  `SpeakerEditorView`. Slipp, Fil-menyen, Dock-sprett og VoiceOver-annonsering
+  ligger i `ContentView` fordi de gjelder alle fire.
+- **Stepperen er ikke en wizard.** `WorkflowStepper` viser hvor du er; bare
+  ferdige og aktive steg kan trykkes, og alt de gjør er å bytte fane eller
+  gå tilbake. Ingen tilstand bor i den.
+- **Inspektøren skjuler seg aldri av seg selv.** Den gjorde det under 760 pt
+  (620 minimum + 240 inspektør + luft), og review-runden på #47 fant det
+  hullet det er: Talere og Referat var utilgjengelige i et vindu appen selv
+  tillater, knappen var slått av og Vis-menyen gjorde ingenting. Nå står den
+  til brukeren skjuler den (knappen, ⌘⌥T); ved 620 får transkripsjonen 380
+  pt. Ikke gjeninnfør en terskel uten å gi en annen vei til de to fanene.
+- **Arbeidsflytlinja skiller tilgjengelig fra ferdig.** `reachable` er
+  stegene som kan trykkes uten å være gjort: etter transkriberingen er
+  Talere og Referat to sider av samme resultat, og uten skillet sto Talere
+  som «gjenstår» og var dødt fra Referat.
+- **Personvernløftet er avgrenset til transkriberingen.** Referatet sendes
+  til modellen som er valgt, og ollama merker skymodeller med `remote_host`
+  i `/api/tags` (målt 2026-09-05, 0.33: `gemma4:31b-cloud` →
+  `https://ollama.com:443`) — en lokal adresse beviser altså ikke lokal
+  behandling. `summaryDestination` svarer hvor det går (ekstern server
+  først, så skymodell), Referat-fanen viser det under modellvelgeren, og
+  velgerne merker skymodellene med «· sky». Navnesuffikset er ikke nok:
+  `glm-5.1:cloud` og `gemma4:31b-cloud` er begge sky.
+- **Referatets handling er en fast bunn, ikke enden av et scrollfelt.**
+  `SummaryFooter` ligger utenfor `ScrollView`-en i inspektøren. Det var kjernen
+  i #40: «Lag referat» forsvant under folden ved tre talere.
+- **Estimatene er rater fra forrige kjøring** (`Estimates.swift`, #39):
+  sekunder per lydsekund per steg i `stepRates`, og `[lastSek, sekPerTegn]` per
+  modell i `summaryRates`, begge i `UserDefaults`. Lineær tilnærming; teksten
+  sier «ca.» og «vanligvis». Lydlengden kommer fra `AVURLAsset` i
+  `ContentView` og følger `start(input:speakers:audioSeconds:)`; er den 0
+  lagres ingen rate. Steg 4 bruker fortsatt segmenttellingen (`eta`).
+  **Fantes `work/` da jobben startet, lagres og vises ingen rate for steg
+  1–3** (`cachedSteps`): de flyr forbi på cache, og en rate på null sekunder
+  ville gitt «under ett minutt» for diarization på neste ferske fil.
+  Referatets rate kommer fra `load_duration` og `prompt_eval_duration` i
+  ollamas sluttobjekt; `Summarizer.estimateStore` er injiserbar så
+  `--selfcheck` ikke rører brukerens tall.
+- **Referatet rendres rått mens det strømmer, pent når det er ferdig**
+  (`Markdown.swift`, #41). Teksten publiseres ti ganger i sekundet, og
+  `MarkdownBlock.parse` per publisering ville gjort CPU-toppen mot slutten
+  (målt 100 %, se «Referat går rett til ollama») verre. Ingen pakke:
+  `AttributedString(markdown:)` tar inline, overskrifter og lister deles ut
+  linje for linje. `<aside>` hoppes over.
+- **Søket er en egen `TextField`, ikke `.searchable`, og det står i topplinja,
+  ikke i verktøylinja.** Fokus fra ⌘F kan ikke styres programmatisk før macOS
+  15, og plattformen er 14.2. Vis-menyen poster `.focusSearch`; editoren setter
+  `@FocusState`. Som `ToolbarItem(.principal)` virket det ikke: ⌘F flyttet
+  aldri fokus dit (målt 2026-09-05 fra knapp og fra tekstfelt), og feltets
+  208 pt gjorde at «Eksporter» forsvant stille under 760 pt — ingen «»»,
+  ingen knapp, i et vindu appen tillater ned til 620. Med feltet i topplinja
+  står Eksporter ved 620 og ⌘F treffer.
+- **Tidsstemplene er `Text` med trykk, ikke `Button`.** Som knapper var hvert
+  av dem et Tab-stopp, så et møte på 500 segmenter lå mellom dokumentvelgeren
+  og inspektøren (målt 2026-09-05 med tastaturnavigering). VoiceOver får
+  fortsatt en knapp: `.isButton`-trait og `.accessibilityAction`.
+- **Døde steg i arbeidsflytlinja er ikke knapper.** Med
+  `allowsHitTesting(false)` var de fire stegene i oppsettet fortsatt i
+  Tab-rekkefølgen, og det første fikk fokus ved start. Og en knapp med
+  `Image(systemName: "checkmark")` i etiketten blir `AXSelected` av seg selv,
+  så VoiceOver sa «markert» om de ferdige stegene; `.accessibilityRemoveTraits`
+  tar det bort.
+- **Én etikett per kontroll.** `Picker("Mal")` + `.accessibilityLabel("Mal")`
+  ga «Mal Mal» i VoiceOver, og `LabeledContent` + `labelsHidden()` +
+  `.accessibilityLabel` ga «Antall talere» tre ganger. Picker-tittelen er
+  etiketten; ikke legg på en til.
+- **Tilgjengelighetsrunden er målt, ikke antatt** (2026-09-05, se
+  [#40](https://github.com/Oschlo/schous/issues/40)): tastaturnavigering med
+  `AppleKeyboardUIMode 2`, VoiceOver via AppleScript (`content of last
+  phrase` gir det VO faktisk sa; «Tillat at VoiceOver styres med AppleScript»
+  må slås på i VoiceOver-verktøy for hånd — `defaults write` mot
+  `com.apple.VoiceOver4/default` tok ikke), og økt kontrast / redusert
+  gjennomsiktighet / redusert bevegelse slått på i Systemvalg for hånd, fordi
+  `com.apple.universalaccess` ikke kan skrives fra et skall. Systemets
+  Tekststørrelse gjør ingenting med appen — og ikke med
+  `NSFont.preferredFont(forTextStyle:)` i en naken binær heller (13/17 pt med
+  globalen på XXXL), så det er plattformen, ikke appen.
+- **«Lagre» heter «Eksporter», ⌘S står.** Knappen skriver TXT/SRT/JSON til
+  målmappa, og det er eksport. Snarveien er dokumentert og innarbeidet.
+- **Tittelen er `title.txt` i jobbmappa** (#42), ved siden av `context.txt`
+  og `speakers.json`. `outputBase(title:date:fallback:)` i `Segment.swift`
+  gir `2026-09-03 Tittel` eller kildefilas navn; datoen er inputfilas
+  `creationDate`. Bare *navnet* på filene i målmappa endres — innholdet er
+  fortsatt den byte-eksakte porten, og `output/` i jobbmappa røres ikke.
+- **Eksportstatusen står under arbeidsflyt-linja, ikke i verktøylinja.** Målt
+  2026-09-04 ved 900 pt: med «Lagret TXT som «klipp-a» i Møtereferater» som
+  `ToolbarItem(.status)` ved siden av søkefeltet fløt hele verktøylinja over i
+  «»». **Og den har fast høyde, alltid.** Arbeidsflytlinja og statusen ligger
+  *over* visningen `.inspector` er festet på, så linja får hele vindusbredden
+  (inne i kolonnen brakk den ordene ved 700 pt: «Tran-skri-bering»). Prisen
+  er at toppen ikke kan endre høyde: da statusen dukket opp første gang sto
+  begge kolonnene forskjøvet opp under verktøylinja til neste layout-runde
+  (målt 2026-09-05), samme feil som bunnen i inspektøren. Uten status står
+  «⌘S eksporterer til «mappe»» i sporet.
+- **Stegene i arbeidsflytlinja har ikke `.accessibilityElement(children:
+  .ignore)`.** Med den sto de som `AXUnknown` uten navn i AX-treet (målt
+  2026-09-05 med System Events), altså usynlige for VoiceOver. En `Button`
+  slår barna sammen selv; `.accessibilityLabel` på den holder.
+- **Bunnen i inspektøren har fast høyde, og det er ikke pynt.** Endret
+  `SummaryFooter` høyde midt i en kjøring — statusen som kom ved start, og
+  «Referat lagret som …» + «Vis i Finder» ved slutt — sto *hele* vinduets
+  innhold, begge kolonner, forskjøvet opp under verktøylinja til neste
+  layout-runde. Under strømmingen så alt riktig ut, fordi hver tekstpakke er
+  en layout-runde; etter ferdig sto det slik til noen rørte vinduet.
+  Bisektert 2026-09-04 med ett referat per kandidat (ministral-3, klipp på
+  60 s): GeometryReader-bakgrunnen, en betinget knapp i verktøylinja,
+  `.animation(value: hasSummary)`, byttet Text → MarkdownView, Dock-sprett og
+  VoiceOver-annonsering, knappebyttet Stopp ↔ Lag referat,
+  `Text(style: .timer)` og `.link`-knappen — alle fjernet én og én, feilen
+  sto. Med konstant innhold i bunnen forsvant den; med `.frame(height:)` rundt
+  statusen er den borte med alt det andre på plass. Rammen sitter nå på en
+  `ScrollView` rundt statusen, ikke på en klippet stabel: en lagringsfeil
+  med sti og servermelding trenger mer enn fire linjer, og slutten må
+  kunne nås. Høyden utenfor er like fast.
+- **`outputPath` eies av `AppSettings`.** Innstillinger → Generelt viser den,
+  så den kunne ikke bo som `@State` i `ContentView` lenger.
+- **Innstillinger er en `TabView` uten fast høyde.** macOS setter tittelen
+  etter fanen og vinduet følger panelet. Sjekkene låser bare backend-feltet;
+  «Avbryt» dreper prosessen via `register`-parameteren på `capture`, som
+  `--selfcheck` kjører mot `/bin/sleep`.
+- **`modelsCached` er en filsjekk** på de to katalogene `huggingface_hub`
+  lager under `~/.cache/huggingface/hub`. Den er der fordi README kaller
+  nedlastingen første jobbs mest sannsynlige «den henger»; nå sier
+  tomtilstanden og fremdriften det på forhånd.
+
 ## Snarveier, Fil-menyen og hurtigtasten
 
 Fire ting som ser vilkårlige ut i koden og ikke er det:
@@ -638,11 +770,13 @@ Fire ting som ser vilkårlige ut i koden og ikke er det:
   skrev fila og gjorde Schous fremst. Kombinasjonen er fast. `.keyboardShortcut`
   på menyknappen *viser* den bare; en menysnarvei virker kun mens menyen er
   åpen.
-- **Fil-menyen sier fra, den handler ikke.** `.commands` bor på scenen og vet
+- **Menyene sier fra, de handler ikke.** `.commands` bor på scenen og vet
   ikke om vinduet viser oppsettet eller editoren, og `FocusedValue` er mer
-  kode enn det er verdt for to elementer. «Åpne…» og «Lagre» poster derfor
-  `.openFile`/`.saveOutputs`, og visningen som er framme lytter. Prisen: ⌘S
-  utenfor editoren gjør ingenting, stille. Det er kjent og godtatt.
+  kode enn det er verdt for fire elementer. «Åpne…», «Eksporter», «Søk i
+  transkripsjonen» og «Vis eller skjul inspektør» poster derfor
+  `.openFile`/`.saveOutputs`/`.focusSearch`/`.toggleInspector`, og visningen
+  som er framme lytter. Prisen: ⌘S og ⌘F utenfor editoren gjør ingenting,
+  stille. Det er kjent og godtatt.
 - **Dock-spretten har ingen «er appen aktiv»-sjekk med vilje.**
   `requestUserAttention` ignoreres av macOS når appen alt er fremst, så en
   sjekk foran ville bare gjentatt den. Kalles på `.done`, `.stopped` og
@@ -745,6 +879,12 @@ limitation, not a UI nicety. `root()` follows merge chains with a hop limit;
 - Driving the UI via System Events works, but setting a SwiftUI `TextField`'s
   AXValue directly does **not** fire the binding — click the field and
   `keystroke` instead, with delays.
+- **`click at {x, y}` fra System Events når ikke alle `.plain`-knapper.** Målt
+  2026-09-05: den traff «Åpne resultat», segmentkontrollen og
+  tidsstempel-knappene, men ikke ett eneste steg i arbeidsflytlinja — som
+  dermed så død ut. Et ekte HID-klikk (`CGEvent(mouseEventSource:mouseType:
+  .leftMouseDown …)` postet til `.cghidEventTap`, ti linjer Swift) traff. Når
+  et klikk «ikke gjør noe», send et CGEvent før du feilsøker visningen.
 - **`click menu item …` does nothing to a `MenuBarExtra` menu, and returns
   success while doing it.** `osascript` exits 0, no error, and the app never
   sees the press — a test written that way silently measures an app that was

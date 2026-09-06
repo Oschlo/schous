@@ -29,7 +29,28 @@ final class TranscriptionJob: ObservableObject {
     private(set) var jobDir: URL?
     private(set) var base = ""
 
-    static let stepNames = ["", "Lyd", "Diarization", "Språk per taler", "Transkriberer"]
+    /// Det brukeren får, ikke hva algoritmen heter: «Finner talere», ikke
+    /// «Diarization». Backendens egne ord står i `technicalNames`, til Detaljer.
+    static let stepNames = ["", "Forbereder lyd", "Finner talere", "Finner språk", "Transkriberer"]
+    static let technicalNames = ["", "lyd", "diarization", "språk per taler", "transkriberer"]
+
+    private(set) var input: URL?
+    /// Lydlengden i sekunder, fra AVURLAsset i ContentView. 0 = ukjent; da
+    /// lagres ingen rate og vises ingen anslag.
+    private(set) var audioSeconds: Double = 0
+    @Published private(set) var stepStarted: Date?
+    /// work/ fantes da jobben startet: steg 1–3 flyr forbi på cache, og en
+    /// rate på null sekunder ville gitt «under ett minutt» for diarization
+    /// neste gang. Da verken lagres eller vises anslag for dem.
+    private(set) var cachedSteps = false
+
+    /// Gjenstående i gjeldende steg fra forrige kjørings rate, eller nil.
+    /// Steg 4 har et ekte anslag (`eta`) fra segmenttellingen og bruker ikke dette.
+    var stepEstimate: TimeInterval? {
+        guard !(cachedSteps && step < 4), let t0 = stepStarted,
+              let total = Estimates.stepEstimate(step, audioSeconds: audioSeconds) else { return nil }
+        return max(0, total - Date().timeIntervalSince(t0))
+    }
 
     /// Steg 2 rapporterer nå fremdrift per understeg, ikke bare steg 4.
     /// Baren fylles og nullstilles per understeg i steg 2; det er med vilje.
@@ -42,7 +63,7 @@ final class TranscriptionJob: ObservableObject {
 
     // MARK: - Start
 
-    func start(input: URL, speakers: Int?) {
+    func start(input: URL, speakers: Int?, audioSeconds: Double = 0) {
         let settings = AppSettings.shared
         guard let backend = settings.backendURL, let python = settings.pythonURL,
               FileManager.default.isExecutableFile(atPath: python.path) else {
@@ -51,8 +72,11 @@ final class TranscriptionJob: ObservableObject {
         }
 
         base = input.deletingPathExtension().lastPathComponent
+        self.input = input
+        self.audioSeconds = audioSeconds
         let dir = Self.jobDirectory(for: input)
         jobDir = dir
+        cachedSteps = FileManager.default.fileExists(atPath: dir.appending(path: "work").path)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 
         segments = []
@@ -60,6 +84,7 @@ final class TranscriptionJob: ObservableObject {
         done = 0; total = 0; eta = ""; detail = ""; speakerCount = 0
         step = 1
         stepLabel = Self.stepNames[1]
+        stepStarted = Date()
         state = .running
 
         let p = Process()
@@ -90,12 +115,26 @@ final class TranscriptionJob: ObservableObject {
         return fm.fileExists(atPath: json.path) && !fm.fileExists(atPath: partial.path) ? json : nil
     }
 
+    struct FinishedInfo { let segments: Int; let modified: Date }
+
+    /// Til «Ferdig · 5 segmenter · sist endret …» i oppsettet. Leser fila; den
+    /// er liten, og kalles fra .task, ikke fra body.
+    static func finishedInfo(for input: URL) -> FinishedInfo? {
+        guard let json = finishedOutput(for: input),
+              let data = try? Data(contentsOf: json),
+              let segs = try? JSONDecoder().decode([Segment].self, from: data),
+              let date = try? json.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+        else { return nil }
+        return FinishedInfo(segments: segs.count, modified: date)
+    }
+
     /// Laster en ferdig jobb rett inn i editoren. Egen knapp, ikke en snarvei
     /// i start(): den som endrer «Talere» og trykker Start skal få en ny
     /// kjøring, ikke forrige svar.
     func loadFinished(input: URL) {
         guard let json = Self.finishedOutput(for: input) else { return }
         base = input.deletingPathExtension().lastPathComponent
+        self.input = input
         jobDir = Self.jobDirectory(for: input)
         do {
             segments = try JSONDecoder().decode([Segment].self, from: Data(contentsOf: json))
@@ -269,10 +308,12 @@ final class TranscriptionJob: ObservableObject {
     func apply(_ e: Event) {
         switch e.event {
         case "step":
+            closeStep()
             step = e.step ?? step
             stepLabel = Self.stepNames[(1...4).contains(step) ? step : 0]
             detail = ""
             done = 0
+            stepStarted = Date()
             if step == 4 { step4Start = Date() }
         case "progress":
             done = e.completed ?? done
@@ -288,16 +329,28 @@ final class TranscriptionJob: ObservableObject {
             speakerCount = e.speakers ?? 0
             detail = "\(total) segmenter, \(speakerCount) talere"
         case "language":
-            detail = "taler \(e.completed ?? 0)/\(e.total ?? 0) — "
+            detail = "taler \(e.completed ?? 0) av \(e.total ?? 0) · "
                 + "\(e.speaker ?? "?"): \(e.language ?? "?")"
         case "resume":
             detail = "gjenopptar \(e.completed ?? 0) ferdige segmenter"
         case "done", "interrupted":
+            closeStep()
             detail = ""
             eta = ""
         default:
             break
         }
+    }
+
+    /// Skriver ned hvor lang tid steget tok, som rate mot lydlengden — det er
+    /// anslaget neste kjøring viser. Et avbrutt steg («interrupted») lagres
+    /// også; raten blir for lav, og retter seg ved neste hele kjøring.
+    private func closeStep() {
+        guard let t0 = stepStarted, (1...4).contains(step) else { return }
+        if !(cachedSteps && step < 4) {
+            Estimates.recordStep(step, seconds: Date().timeIntervalSince(t0), audioSeconds: audioSeconds)
+        }
+        stepStarted = nil
     }
 
     /// ponytail: enkelt snitt siden steg 4 startet. Ved gjenopptagelse flyr de

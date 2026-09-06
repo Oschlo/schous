@@ -22,16 +22,27 @@ struct SchousApp: App {
                 .task { await Updater.shared.checkIfDue() }
         }
         .windowResizability(.contentMinSize)
-        // Fil-menyen: Åpne… og Lagre. Menyen vet ikke hvilken visning som står
-        // i vinduet, så den sier bare fra; den som lytter, handler.
+        // Stor nok til dokument + inspektør uten at noe klemmes; minimum er 620.
+        .defaultSize(width: 900, height: 620)
+        // Menyene sier fra, de handler ikke. Menyen vet ikke hvilken visning
+        // som står i vinduet, så den poster; den som lytter, handler. ⌘S
+        // utenfor editoren gjør derfor ingenting, stille — kjent og godtatt.
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("Åpne…") { NotificationCenter.default.post(name: .openFile, object: nil) }
                     .keyboardShortcut("o")
             }
             CommandGroup(replacing: .saveItem) {
-                Button("Lagre") { NotificationCenter.default.post(name: .saveOutputs, object: nil) }
+                Button("Eksporter") { NotificationCenter.default.post(name: .saveOutputs, object: nil) }
                     .keyboardShortcut("s")
+            }
+            // Søk og inspektør finnes i Vis-menyen, så verktøylinja aldri er
+            // eneste inngang. ⌘⌥T, ikke ⌘⌥]: «]» er ⌥9 på norsk tastatur.
+            CommandGroup(after: .sidebar) {
+                Button("Søk i transkripsjonen") { NotificationCenter.default.post(name: .focusSearch, object: nil) }
+                    .keyboardShortcut("f")
+                Button("Vis eller skjul inspektør") { NotificationCenter.default.post(name: .toggleInspector, object: nil) }
+                    .keyboardShortcut("t", modifiers: [.command, .option])
             }
         }
 
@@ -69,6 +80,8 @@ private extension NSImage {
 extension Notification.Name {
     static let openFile = Notification.Name("co.oschlo.schous.openFile")
     static let saveOutputs = Notification.Name("co.oschlo.schous.saveOutputs")
+    static let focusSearch = Notification.Name("co.oschlo.schous.focusSearch")
+    static let toggleInspector = Notification.Name("co.oschlo.schous.toggleInspector")
 }
 
 private struct MenuBarContent: View {
@@ -89,9 +102,12 @@ private struct MenuBarContent: View {
         if recorder.isRecording {
             // Nivået mens det pågår. Et dødt spor oppdaget etter at møtet er
             // over er en obduksjon; dette er tidsnok til å gjøre noe.
+            // Blokktegnene er for øyet; VoiceOver får tallet.
             Text("System   \(meter(recorder.systemLevel))")
+                .accessibilityLabel("Systemlyd \(Int(recorder.systemLevel * 100)) prosent")
             if recorder.inputLabel != nil {
                 Text("Mikrofon \(meter(recorder.micLevel))")
+                    .accessibilityLabel("Mikrofon \(Int(recorder.micLevel * 100)) prosent")
             }
         }
         if let mic = recorder.inputLabel {
