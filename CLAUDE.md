@@ -900,11 +900,13 @@ limitation, not a UI nicety. `root()` follows merge chains with a hop limit;
   som kjører.
 - **`name of every button of window 1` i System Events finner ikke knappene i
   vinduet**: spørringen er ikke rekursiv forbi `group 1 of window 1`, og
-  SwiftUI-knapper har ikke `AXTitle` i det hele tatt — heller ikke «Åpne
-  resultat», som VoiceOver-runden på #40 godkjente, så det er formen og ikke
-  en feil (målt 2026-09-07). Bruk `help`-teksten eller indeksen i `group 1`,
-  og `class of every UI element of group 1 of window 1` som tilstandssjekk:
-  forsiden er 8 elementer, oppsettet 16.
+  knappene har ikke egen `AXTitle` — heller ikke «Åpne resultat», som
+  VoiceOver-runden på #40 godkjente, så det er formen og ikke en feil; de to
+  i `LabeledContent` («Velg…», «Vis i Finder») svarer med containerens navn,
+  «Lagre i» (målt 2026-09-07). Bruk `help`-teksten eller indeksen i
+  `group 1`, og `class of every UI element of group 1 of window 1` som
+  tilstandssjekk: med backend og modeller klare og uten opptaksvarsel er
+  forsiden 8 elementer og oppsettet 16.
 
 ## Never do
 
