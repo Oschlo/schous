@@ -772,11 +772,12 @@ Fire ting som ser vilkårlige ut i koden og ikke er det:
   åpen.
 - **Menyene sier fra, de handler ikke.** `.commands` bor på scenen og vet
   ikke om vinduet viser oppsettet eller editoren, og `FocusedValue` er mer
-  kode enn det er verdt for fire elementer. «Åpne…», «Eksporter», «Søk i
+  kode enn det er verdt for fem elementer. «Ny», «Åpne…», «Eksporter», «Søk i
   transkripsjonen» og «Vis eller skjul inspektør» poster derfor
-  `.openFile`/`.saveOutputs`/`.focusSearch`/`.toggleInspector`, og visningen
-  som er framme lytter. Prisen: ⌘S og ⌘F utenfor editoren gjør ingenting,
-  stille. Det er kjent og godtatt.
+  `.newFile`/`.openFile`/`.saveOutputs`/`.focusSearch`/`.toggleInspector`, og
+  visningen som er framme lytter. Prisen: ⌘S og ⌘F utenfor editoren gjør
+  ingenting, stille, og ⌘N/⌘O under en kjørende jobb likeså. Det er kjent og
+  godtatt.
 - **Dock-spretten har ingen «er appen aktiv»-sjekk med vilje.**
   `requestUserAttention` ignoreres av macOS når appen alt er fremst, så en
   sjekk foran ville bare gjentatt den. Kalles på `.done`, `.stopped` og
@@ -893,6 +894,17 @@ limitation, not a UI nicety. `root()` follows merge chains with a hop limit;
   asserted on: the level meters and any live warning are menu items too.
 - Synthetic `say`-generated voices are useless for testing diarization; pyannote
   merges them into one speaker. Use a real recording to exercise merge/rename.
+- **`open Schous.app` med relativ sti startet `/Applications/Schous.app`, ikke
+  repo-bygget** (målt 2026-09-07). Bruk absolutt sti til bundlen i repoet når
+  du måler, og sjekk med `ps -o comm= -p $(pgrep -x Schous)` at det er den
+  som kjører.
+- **`name of every button of window 1` i System Events finner ikke knappene i
+  vinduet**: spørringen er ikke rekursiv forbi `group 1 of window 1`, og
+  SwiftUI-knapper har ikke `AXTitle` i det hele tatt — heller ikke «Åpne
+  resultat», som VoiceOver-runden på #40 godkjente, så det er formen og ikke
+  en feil (målt 2026-09-07). Bruk `help`-teksten eller indeksen i `group 1`,
+  og `class of every UI element of group 1 of window 1` som tilstandssjekk:
+  forsiden er 8 elementer, oppsettet 16.
 
 ## Never do
 
