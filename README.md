@@ -188,6 +188,8 @@ to switch.
    **Velg fil…** (⌘O). Schous is also listed under **Open With** in Finder, and
    a file dropped on the Dock icon opens the same way. Before a file is
    chosen, the window says whether the backend and the models are ready.
+   **Fjern** on the file card, or **Ny** (⌘N) in the File menu, goes back to
+   that front page; **Start opptak** is available on both.
 2. Choose the output folder (the full path is in the tooltip, **Vis i Finder**
    opens it) and the number of speakers — **Automatisk** unless you know it.
 3. **Start transkribering.** The running job is the whole window: the four
@@ -216,6 +218,7 @@ Dock icon bounces once, and VoiceOver announces it.
 
 | Action | Shortcut |
 |---|---|
+| New — back to the front page | ⌘N |
 | Open a file | ⌘O |
 | Start transcription / open result | ⌘↩ |
 | Pause / resume | ⌘⇧P |
