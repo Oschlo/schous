@@ -62,6 +62,9 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .openFile)) { _ in
             if !isBusy { pickInput() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .newFile)) { _ in
+            if !isBusy { open(nil) }
+        }
         // Dock-ikonet spretter når jobben er ferdig og appen ikke er fremst;
         // er den fremst, ignorerer macOS forespørselen selv. VoiceOver får
         // beskjed uansett — en fargeendring og et sprett er ikke en melding.

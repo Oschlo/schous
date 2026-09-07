@@ -29,6 +29,9 @@ struct SchousApp: App {
         // utenfor editoren gjør derfor ingenting, stille — kjent og godtatt.
         .commands {
             CommandGroup(replacing: .newItem) {
+                // ⌘N er blankt ark: tilbake til forsiden, også fra editoren.
+                Button("Ny") { NotificationCenter.default.post(name: .newFile, object: nil) }
+                    .keyboardShortcut("n")
                 Button("Åpne…") { NotificationCenter.default.post(name: .openFile, object: nil) }
                     .keyboardShortcut("o")
             }
@@ -78,6 +81,7 @@ private extension NSImage {
 }
 
 extension Notification.Name {
+    static let newFile = Notification.Name("co.oschlo.schous.newFile")
     static let openFile = Notification.Name("co.oschlo.schous.openFile")
     static let saveOutputs = Notification.Name("co.oschlo.schous.saveOutputs")
     static let focusSearch = Notification.Name("co.oschlo.schous.focusSearch")
