@@ -910,6 +910,11 @@ limitation, not a UI nicety. `root()` follows merge chains with a hop limit;
 
 ## Never do
 
+- **Repoet er offentlig.** Issues, PR-er, commit-meldinger og denne fila leses
+  av hvem som helst. Ingen kontonavn, e-postadresser, kalenderdata, navn på
+  møtedeltakere eller detaljer om hvilke kontoer og apper som finnes på
+  utviklermaskinen. Målinger og feilmeldinger er greit; det som identifiserer
+  en person eller en konto er det ikke.
 - Don't print secrets. Presence checks use `[ -n "$TOKEN" ]` and `${#TOKEN}` —
   `${TOKEN:-fallback}` expands to the **value** when set and leaks it.
 - Don't commit media or transcripts. `.gitignore` covers `*.wav`, `*.mp4`,
