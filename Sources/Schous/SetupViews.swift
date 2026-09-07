@@ -190,9 +190,11 @@ struct JobSetupView: View {
     @Binding var speakers: Int
     let pickInput: () -> Void
     let pickOutput: () -> Void
+    let clear: () -> Void
     let start: () -> Void
     let openResult: () -> Void
     @ObservedObject private var settings = AppSettings.shared
+    @ObservedObject private var recorder = Recorder.shared
     @State private var info: TranscriptionJob.FinishedInfo?
 
     var body: some View {
@@ -202,7 +204,17 @@ struct JobSetupView: View {
                     FileHeader(input: input, duration: duration)
                     Spacer()
                     Button("Bytt fil…", action: pickInput).buttonStyle(.borderless)
+                    Button("Fjern", action: clear).buttonStyle(.borderless)
+                        .help("Legger bort fila og går tilbake til forsiden.")
                 }
+            }
+
+            // Samme knapp som i tomtilstanden, på samme sted i forhold til
+            // slippsonen. Det ferdige opptaket forhåndsvelges av lastRecording.
+            if !recorder.isRecording {
+                Button("Start opptak", systemImage: "record.circle") { recorder.start() }
+                    .buttonStyle(.borderless)
+                    .help("Tar opp systemlyd og mikrofon fra menylinja. ⌃⌥R fra hvilken som helst app.")
             }
 
             VStack(alignment: .leading, spacing: 12) {

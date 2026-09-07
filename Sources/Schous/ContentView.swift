@@ -34,6 +34,7 @@ struct ContentView: View {
                         .padding(.horizontal, 24).padding(.top, 16)
                     JobSetupView(job: job, input: input, duration: duration, dropping: dropping,
                                  speakers: $speakers, pickInput: pickInput, pickOutput: settings.pickOutputFolder,
+                                 clear: { open(nil) },
                                  start: start, openResult: { job.loadFinished(input: input) })
                 } else {
                     EmptyStateView(dropping: dropping, pickFile: pickInput)
@@ -129,11 +130,12 @@ struct ContentView: View {
         if panel.runModal() == .OK, let url = panel.url { open(url) }
     }
 
-    /// Ny fil valgt med vilje: body velges på job.state, ikke på input, så
-    /// editoren må forlates eksplisitt. Et ferdig opptak (`lastRecording`) går
-    /// ikke hit — det bare forhåndsvelges, ellers rev opptaksstoppet ned
-    /// editoren midt i talernavn som ikke var lagret, og avbrøt et referat.
-    private func open(_ url: URL) {
+    /// Ny fil valgt med vilje, eller `nil` for forsiden («Fjern», ⌘N): body
+    /// velges på job.state, ikke på input, så editoren må forlates eksplisitt.
+    /// Et ferdig opptak (`lastRecording`) går ikke hit — det bare
+    /// forhåndsvelges, ellers rev opptaksstoppet ned editoren midt i talernavn
+    /// som ikke var lagret, og avbrøt et referat.
+    private func open(_ url: URL?) {
         input = url
         if job.state == .done { leaveEditor() }
     }
