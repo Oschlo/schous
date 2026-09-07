@@ -56,7 +56,10 @@ struct ContentView: View {
             duration = try? await AVURLAsset(url: input).load(.duration).seconds
         }
         // Et ferdig menylinje-opptak forhåndsvelges, klart til å transkriberes.
-        .onReceive(Recorder.shared.$lastRecording.compactMap { $0 }) { input = $0 }
+        // Ikke under en kjøring: miksingen blir ferdig etter at stopp-knappen er
+        // trykket, og har brukeren startet en transkribering i mellomtida, ville
+        // fremdriften vist opptaket mens jobben maler på den gamle fila.
+        .onReceive(Recorder.shared.$lastRecording.compactMap { $0 }) { if !isBusy { input = $0 } }
         // Finder «Åpne med» og fil sluppet på Dock-ikonet (CFBundleDocumentTypes).
         .onOpenURL { if !isBusy { open($0) } }
         .onReceive(NotificationCenter.default.publisher(for: .openFile)) { _ in
