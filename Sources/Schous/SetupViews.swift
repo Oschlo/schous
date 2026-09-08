@@ -222,7 +222,7 @@ struct JobSetupView: View {
                     HStack(spacing: 8) {
                         Text(outputDir.lastPathComponent)
                             .lineLimit(1).truncationMode(.head)
-                            .help(outputDir.path)
+                            .help((outputDir.path as NSString).abbreviatingWithTildeInPath)
                         Button("Velg…", action: pickOutput)
                         Button("Vis i Finder") {
                             NSWorkspace.shared.activateFileViewerSelecting([outputDir])
@@ -319,7 +319,9 @@ private struct FileHeader: View {
                 // varigheten i samme streng var det den som forsvant først.
                 HStack(spacing: 4) {
                     if let length { Text("\(length) ·") }
-                    Text(input.deletingLastPathComponent().path)
+                    // ~, ikke /Users/<navn>: stien står i skjermbildene i README
+                    // (#22 sladdet den én gang; nå kan den ikke lekke igjen).
+                    Text((input.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath)
                         .lineLimit(1).truncationMode(.head)
                 }
                 .font(.caption).foregroundStyle(.secondary)
