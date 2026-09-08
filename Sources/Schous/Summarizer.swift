@@ -243,11 +243,11 @@ final class Summarizer: ObservableObject {
             }
             throw HTTPError(status: status, body: msg)
         }
-        // Strupt publisering: målt 2026-09-04 på en 8.8k-ords transkripsjon —
-        // ollama strømmet ferdig på ~6 min, appen brukte så ~7 min til på
-        // 100 % CPU i SwiftUI-layout som tygget bufrede tokens (ett re-render
-        // per linje, se `SpeakerEditorView.hasSummary`). `pending` samles opp
-        // og flushes til `text` maks ti ganger i sekundet.
+        // Strupt publisering: `pending` samles opp og flushes til `text` maks
+        // ti ganger i sekundet. Det hjelper bare så lenge én publisering
+        // koster under 100 ms — koster den mer, blir det én flush per linje
+        // uansett, og løkka her faller bak strømmen (#54: 35 min etter at
+        // ollama var ferdig). Kostnaden bor i visningen, se `SummaryPanel`.
         var pending = ""
         var lastFlush = Date.distantPast
         // Etter cancel() har run() alt nullstilt `text` for neste kjøring;

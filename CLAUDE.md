@@ -387,10 +387,31 @@ Fire ting som er målt og som koden hviler på:
   ```
 
   Appen er altså ferdig i samme åndedrag som ollama, ikke sju minutter etter.
-  CPU-en når likevel 100 % mot slutten: ti re-render i sekundet av en tekst
-  som vokser, og hele `SpeakerEditorView` tegnes fortsatt per publisering
-  (`hasSummary` leser `summarizer.text`). Neste trinn er å la bare
-  `SummaryPanel` observere teksten — når noen måler at det trengs.
+  **Det holdt ikke på lengre referater** ([#54](https://github.com/Oschlo/schous/issues/54)):
+  et referat på 16 040 tegn og 208 linjer (qwen3.8:27b-mlx, 57 min opptak)
+  sto ferdig hos ollama 17:58:36 og ble lagret 18:34:13 — 35 min 37 s på
+  100 % CPU med forbindelsen alt lukket. `sample` sto i CoreText under
+  `NSHostingView.minSize()` og `CABackingStoreUpdate`: SwiftUI-`Text` legger
+  ut og tegner *hele* strengen på nytt per publisering, og prisen vokser
+  superlineært med antall avsnitt, ikke med antall tegn. Målt 2026-09-08 i
+  en isolert harness (6 000 tegn i 4-tegns pakker, ideelt 30 s):
+
+  ```
+  Text, referatet (80 linjer)              280 ms/publisering   132 s
+  Text, samme tekst uten linjeskift          2 ms                34 s
+  Text, lorem med linjeskift per 80 tegn   144 ms                88 s
+  Text, siste 2 000 tegn                    26 ms                49 s
+  TextEditor (NSTextView)                    2 ms                33 s
+  .windowResizability og .textSelection    ingen forskjell
+  ```
+
+  Passerer én publisering 100 ms, gir strupingen én flush per token, og
+  totalen blir tokens × linjer². Streaming-visningen er derfor en
+  `TextEditor` med konstant binding; ferdig referat rendres som før. Mot
+  samme app med en falsk ollama som strømmet nøyaktig det referatet i
+  50 tokens/s: før 18 min 30 s fra `done` til «Referat lagret», etter under
+  ett sekund, og 25–40 % CPU under strømmingen i stedet for 100.
+  `hasSummary` leser fortsatt `summarizer.text`; det var ikke faktoren.
 
 `thinking`-feltet i strømmen leses ikke. Slipper det inn, står modellens
 grubling i referatet.
@@ -874,6 +895,11 @@ limitation, not a UI nicety. `root()` follows merge chains with a hop limit;
 - `open Schous.app --args …` only passes arguments on a **fresh** launch.
   If the app is already running, `open` just activates it and `--input` is
   silently ignored. `pkill -x Schous` first.
+- **En løs SwiftUI-binær fra skallet får ikke noe vindu på skjermen**, og
+  målte da 5 ms per publisering der den ekte (aktivert med
+  `NSApp.setActivationPolicy(.regular)`) målte 280. Layout uten vindu måler
+  ingenting. **Og kjør slike harnesser én om gangen:** fem parallelt ga fem
+  identiske tall — WindowServer-køen, ikke visningen.
 - `defaults write` can race with `cfprefsd`. `killall cfprefsd` after writing if
   the app reads a stale value.
 - Driving the UI via System Events works, but setting a SwiftUI `TextField`'s

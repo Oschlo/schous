@@ -230,24 +230,37 @@ struct SummaryFooter: View {
 }
 
 /// Teksten mens den strømmer inn, og etterpå. Full høyde i dokumentkolonnen;
-/// fanen over velger mellom denne og transkripsjonen. Rått mens det strømmer
-/// — teksten vokser ti ganger i sekundet, og renderingen skal ikke gjøre
-/// CPU-toppen mot slutten verre — og rendret Markdown når den er ferdig (#41).
+/// fanen over velger mellom denne og transkripsjonen. Rendret Markdown når
+/// den er ferdig (#41) — og en NSTextView under strømmingen, ikke `Text`:
+/// SwiftUI-`Text` legger ut og tegner *hele* teksten på nytt ved hver
+/// publisering, med en kostnad som vokser superlineært med antall avsnitt
+/// (#54). Målt 2026-09-08 i en isolert harness, 6 000 tegn i 4-tegns pakker:
+///
+///     Text, referat med 80 linjer        280 ms per publisering, 132 s totalt
+///     Text, samme tekst uten linjeskift    2 ms                    34 s
+///     TextEditor (NSTextView)              2 ms                    33 s
+///     ideelt                                                        30 s
+///
+/// Passerer kostnaden strupingen på 100 ms i `Summarizer.stream`, blir det
+/// én publisering per token, og appen tygget et referat på 16 040 tegn i
+/// 35 min 37 s etter at ollama var ferdig. `.windowResizability` og
+/// `.textSelection` var ikke faktorer (målt, samme tall med og uten).
 struct SummaryPanel: View {
     @ObservedObject var summarizer: Summarizer
 
     var body: some View {
-        ScrollView {
-            Group {
-                if summarizer.state == .running {
-                    Text(summarizer.text).textSelection(.enabled)
-                } else {
-                    MarkdownView(text: summarizer.text)
-                }
+        if summarizer.state == .running {
+            TextEditor(text: .constant(summarizer.text))
+                .font(.body)
+                .scrollContentBackground(.hidden)
+                .padding(.horizontal, 20).padding(.vertical, 16)
+        } else {
+            ScrollView {
+                MarkdownView(text: summarizer.text)
+                    .frame(maxWidth: 760, alignment: .leading)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 24).padding(.vertical, 20)
             }
-            .frame(maxWidth: 760, alignment: .leading)
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, 24).padding(.vertical, 20)
         }
     }
 }
