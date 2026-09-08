@@ -407,7 +407,9 @@ Fire ting som er målt og som koden hviler på:
 
   Passerer én publisering 100 ms, gir strupingen én flush per token, og
   totalen blir tokens × linjer². Streaming-visningen er derfor en
-  `TextEditor` med konstant binding; ferdig referat rendres som før. Mot
+  NSTextView (`StreamingTextView`) med `isEditable = false` — ikke
+  `TextEditor` med `.constant`, som fortsatt tar imot tastetrykk og paste
+  lokalt til neste publisering skriver over dem; ferdig referat rendres som før. Mot
   samme app med en falsk ollama som strømmet nøyaktig det referatet i
   50 tokens/s: før 18 min 30 s fra `done` til «Referat lagret», etter under
   ett sekund, og 25–40 % CPU under strømmingen i stedet for 100.

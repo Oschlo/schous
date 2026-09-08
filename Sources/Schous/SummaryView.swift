@@ -245,15 +245,16 @@ struct SummaryFooter: View {
 /// én publisering per token, og appen tygget et referat på 16 040 tegn i
 /// 35 min 37 s etter at ollama var ferdig. `.windowResizability` og
 /// `.textSelection` var ikke faktorer (målt, samme tall med og uten).
+///
+/// Ikke `TextEditor` med `.constant`: den er fortsatt redigerbar, NSTextView
+/// tar imot tastetrykket lokalt, og neste publisering skriver over det.
+/// `StreamingTextView` er samme NSTextView med `isEditable = false`.
 struct SummaryPanel: View {
     @ObservedObject var summarizer: Summarizer
 
     var body: some View {
         if summarizer.state == .running {
-            TextEditor(text: .constant(summarizer.text))
-                .font(.body)
-                .scrollContentBackground(.hidden)
-                .padding(.horizontal, 20).padding(.vertical, 16)
+            StreamingTextView(text: summarizer.text)
         } else {
             ScrollView {
                 MarkdownView(text: summarizer.text)
@@ -262,5 +263,30 @@ struct SummaryPanel: View {
                     .padding(.horizontal, 24).padding(.vertical, 20)
             }
         }
+    }
+}
+
+/// Lesbar og markerbar, men ikke redigerbar. Innholdet settes bare når det
+/// har endret seg; sammenlikningen er O(n) per publisering og forsvinner i
+/// layouten.
+struct StreamingTextView: NSViewRepresentable {
+    let text: String
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSTextView.scrollableTextView()
+        let view = scroll.documentView as! NSTextView
+        view.isEditable = false
+        view.isSelectable = true
+        view.drawsBackground = false
+        view.font = .preferredFont(forTextStyle: .body)
+        view.textColor = .labelColor
+        view.textContainerInset = NSSize(width: 20, height: 16)
+        scroll.drawsBackground = false
+        return scroll
+    }
+
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        let view = scroll.documentView as! NSTextView
+        if view.string != text { view.string = text }
     }
 }
