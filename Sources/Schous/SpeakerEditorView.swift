@@ -358,7 +358,8 @@ struct SpeakerEditorView: View {
             targets.append(dir.appending(path: "summary.\(slug).md"))
             try? sel.context.write(to: dir.appending(path: "context.txt"), atomically: true, encoding: .utf8)
         }
-        summarizer.run(prompt: prompt, model: sel.model, baseURL: settings.ollamaBaseURL, writeTo: targets)
+        summarizer.run(prompt: prompt, model: sel.model, baseURL: settings.ollamaBaseURL, writeTo: targets,
+                       header: job.input.map { Summary.frontMatter(source: $0.lastPathComponent) } ?? "")
     }
 
     private var mappingURL: URL? { job.jobDir?.appending(path: "speakers.json") }
@@ -389,7 +390,7 @@ struct SpeakerEditorView: View {
                 .max(by: { (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate ?? .distantPast) ?? .distantPast
                           < (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate ?? .distantPast) ?? .distantPast }),
            let text = try? String(contentsOf: prior, encoding: .utf8) {
-            summarizer.text = text
+            summarizer.text = Summary.body(text)
         }
     }
 }

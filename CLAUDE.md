@@ -16,6 +16,12 @@ swift build              # development
 .build/debug/Schous --selfcheck
 ```
 
+**CLT 27.0 bygger ikke uten `SDKROOT`.** Standard-SDK-en er da macOS 27, der
+`@State` er en makro, og pluginen `SwiftUIMacros` følger bare med Xcode:
+`plugin for module 'SwiftUIMacros' not found`. Koden er ikke feil. `bundle.sh`
+peker på 26.5-SDK-en selv; for `swift build` direkte:
+`SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk swift build`.
+
 ### Signering — «Schous Dev», ikke ad-hoc
 
 `bundle.sh` signerer med en lokal selvsignert identitet ved navn **Schous Dev**,
