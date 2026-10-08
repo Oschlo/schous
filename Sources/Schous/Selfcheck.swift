@@ -177,11 +177,11 @@ func runSelfcheckAndExit() -> Never {
     check(txt == "[00:00:04] Hans Martin (sv): Hei.\n", "txt: \(txt.debugDescription)")
     let kdir = URL.temporaryDirectory.appending(path: "schous-kilde-\(getpid())")
     try! FileManager.default.createDirectory(at: kdir, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(at: kdir) }
     try! writeOutputs(segs, to: kdir, base: "k", source: "møte.m4a", formats: [.txt])
     let ktxt = try! String(contentsOf: kdir.appending(path: "k.txt"), encoding: .utf8)
     check(ktxt == frontMatter(source: "møte.m4a") + txt.replacingOccurrences(of: "Hans Martin", with: "SPEAKER_00"),
           "txt med kilde: \(ktxt.debugDescription)")
+    try? FileManager.default.removeItem(at: kdir)   // ikke defer: selfcheck ender i exit()
 
     // Prompten til referatet bruker samme rendering som TXT-eksporten. Én
     // funksjon, ellers driver de fra hverandre uten at noen merker det.
