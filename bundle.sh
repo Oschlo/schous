@@ -6,6 +6,12 @@ cd "$(dirname "$0")"
 CONFIG="${1:-release}"
 APP="Schous.app"
 
+# CLT 27.0 bygger mot macOS 27-SDK-en, der @State er en makro — men pluginen
+# (SwiftUIMacros) følger ikke med CLT, bare Xcode. Mot 26.5-SDK-en virker alt.
+# ponytail: fast versjon; fjern når en CLT-oppdatering tar med pluginen.
+SDK26=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk
+[[ -z "${SDKROOT:-}" && -d $SDK26 ]] && export SDKROOT=$SDK26
+
 swift build -c "$CONFIG"
 BIN="$(swift build -c "$CONFIG" --show-bin-path)/Schous"
 
