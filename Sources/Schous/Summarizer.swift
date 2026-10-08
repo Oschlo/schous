@@ -50,6 +50,20 @@ enum Summary {
         result += ns.substring(from: scanned)
         return result
     }
+
+    /// Øverst i referatfila, så en agent finner opptaket igjen. Bare filnavnet:
+    /// fila kan flyttes. JSON-quoting er gyldig YAML og tåler kolon og «"» i navnet.
+    static func frontMatter(source: String) -> String {
+        let quoted = String(data: try! JSONEncoder().encode(source), encoding: .utf8)!
+        return "---\nkilde: \(quoted)\n---\n\n"
+    }
+
+    /// Referatet uten front matter — det som vises når en lagret fil lastes inn igjen.
+    static func body(_ file: String) -> String {
+        guard file.hasPrefix("---\n"), let end = file.range(of: "\n---\n", range:
+                file.index(file.startIndex, offsetBy: 3)..<file.endIndex) else { return file }
+        return String(file[end.upperBound...].drop(while: \.isNewline))
+    }
 }
 
 /// Malene er *.md i én mappe. Filnavnet er malnavnet; ingenting parses.
@@ -169,7 +183,7 @@ final class Summarizer: ObservableObject {
 
     deinit { session.finishTasksAndInvalidate() }
 
-    func run(prompt: String, model: String, baseURL: URL, writeTo: [URL]) {
+    func run(prompt: String, model: String, baseURL: URL, writeTo: [URL], header: String = "") {
         cancel()
         text = ""
         state = .running
@@ -190,7 +204,7 @@ final class Summarizer: ObservableObject {
                         + "budsjettet på tenking; prøv en annen modell.")
                     return
                 }
-                try self.write(to: writeTo)
+                try self.write(header + self.text, to: writeTo)
                 self.state = .done(writeTo[0])
             } catch is CancellationError {
                 return
@@ -283,7 +297,7 @@ final class Summarizer: ObservableObject {
         var errorDescription: String? { "Referatet er ufullstendig — \(reason). Ingen fil er skrevet." }
     }
 
-    private func write(to urls: [URL]) throws {
+    private func write(_ text: String, to urls: [URL]) throws {
         for url in urls {
             do { try text.write(to: url, atomically: true, encoding: .utf8) }
             catch {

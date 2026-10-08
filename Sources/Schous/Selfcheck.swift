@@ -526,6 +526,11 @@ private func summarizerSelfcheck() {
     check(Summary.prompt("m", language: "English", context: "", transcript: "t",
                          using: Summary.defaultPrompt).contains("(none)"),
           "tom kontekst skal bli (none)")
+    // Kilden står øverst i referatfila, og forsvinner igjen når fila lastes inn.
+    let fm = Summary.frontMatter(source: #"Møte: "plan".m4a"#)
+    check(fm == "---\nkilde: \"Møte: \\\"plan\\\".m4a\"\n---\n\n", "front matter: \(fm.debugDescription)")
+    check(Summary.body(fm + "# Referat\n") == "# Referat\n", "body strippet ikke front matter")
+    check(Summary.body("# Gammelt\n---\nx") == "# Gammelt\n---\nx", "body rørte et referat uten front matter")
     check(SummaryLanguage.norwegian.promptValue == "Norwegian"
           && SummaryLanguage.english.promptValue == "English", "språkverdier")
 
