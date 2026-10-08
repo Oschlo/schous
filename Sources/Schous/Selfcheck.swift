@@ -531,6 +531,8 @@ private func summarizerSelfcheck() {
     check(fm == "---\nkilde: \"Møte: \\\"plan\\\".m4a\"\n---\n\n", "front matter: \(fm.debugDescription)")
     check(Summary.body(fm + "# Referat\n") == "# Referat\n", "body strippet ikke front matter")
     check(Summary.body("# Gammelt\n---\nx") == "# Gammelt\n---\nx", "body rørte et referat uten front matter")
+    // Codex på #56: skillelinjer øverst og lenger ned er ikke front matter.
+    check(Summary.body("---\n# A\n---\nB") == "---\n# A\n---\nB", "body kuttet ved skillelinjer")
     check(SummaryLanguage.norwegian.promptValue == "Norwegian"
           && SummaryLanguage.english.promptValue == "English", "språkverdier")
 

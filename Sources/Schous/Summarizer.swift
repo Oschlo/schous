@@ -59,10 +59,10 @@ enum Summary {
     }
 
     /// Referatet uten front matter — det som vises når en lagret fil lastes inn igjen.
+    /// Bare nøyaktig vår form: et referat kan selv starte med `---` (skillelinje).
     static func body(_ file: String) -> String {
-        guard file.hasPrefix("---\n"), let end = file.range(of: "\n---\n", range:
-                file.index(file.startIndex, offsetBy: 3)..<file.endIndex) else { return file }
-        return String(file[end.upperBound...].drop(while: \.isNewline))
+        guard let m = file.prefixMatch(of: /---\nkilde: ".*"\n---\n\n/) else { return file }
+        return String(file[m.range.upperBound...])
     }
 }
 
