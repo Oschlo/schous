@@ -322,6 +322,7 @@ struct SpeakerEditorView: View {
         }
         do {
             written = try writeOutputs(job.segments, to: outputDir, base: exportBase,
+                                       source: job.input?.lastPathComponent,
                                        names: resolved, formats: formats)
             saveMapping()
             failed = false
@@ -359,7 +360,7 @@ struct SpeakerEditorView: View {
             try? sel.context.write(to: dir.appending(path: "context.txt"), atomically: true, encoding: .utf8)
         }
         summarizer.run(prompt: prompt, model: sel.model, baseURL: settings.ollamaBaseURL, writeTo: targets,
-                       header: job.input.map { Summary.frontMatter(source: $0.lastPathComponent) } ?? "")
+                       header: job.input.map { frontMatter(source: $0.lastPathComponent) } ?? "")
     }
 
     private var mappingURL: URL? { job.jobDir?.appending(path: "speakers.json") }

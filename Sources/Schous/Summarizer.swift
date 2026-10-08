@@ -51,13 +51,6 @@ enum Summary {
         return result
     }
 
-    /// Øverst i referatfila, så en agent finner opptaket igjen. Bare filnavnet:
-    /// fila kan flyttes. JSON-quoting er gyldig YAML og tåler kolon og «"» i navnet.
-    static func frontMatter(source: String) -> String {
-        let quoted = String(data: try! JSONEncoder().encode(source), encoding: .utf8)!
-        return "---\nkilde: \(quoted)\n---\n\n"
-    }
-
     /// Referatet uten front matter — det som vises når en lagret fil lastes inn igjen.
     /// Bare nøyaktig vår form: et referat kan selv starte med `---` (skillelinje).
     static func body(_ file: String) -> String {
