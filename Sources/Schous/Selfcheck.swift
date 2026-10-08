@@ -171,10 +171,17 @@ func runSelfcheckAndExit() -> Never {
     let segs = [Segment(start: 4.216, end: 7.905, speaker: "SPEAKER_00", language: "sv", text: "Hei.")]
     let dir = URL.temporaryDirectory.appending(path: "schous-selfcheck-\(getpid())")
     try! FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    try! writeOutputs(segs, to: dir, base: "t", names: ["SPEAKER_00": "Hans Martin"])
+    try! writeOutputs(segs, to: dir, base: "t", source: nil, names: ["SPEAKER_00": "Hans Martin"])
 
     let txt = try! String(contentsOf: dir.appending(path: "t.txt"), encoding: .utf8)
     check(txt == "[00:00:04] Hans Martin (sv): Hei.\n", "txt: \(txt.debugDescription)")
+    let kdir = URL.temporaryDirectory.appending(path: "schous-kilde-\(getpid())")
+    try! FileManager.default.createDirectory(at: kdir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: kdir) }
+    try! writeOutputs(segs, to: kdir, base: "k", source: "møte.m4a", formats: [.txt])
+    let ktxt = try! String(contentsOf: kdir.appending(path: "k.txt"), encoding: .utf8)
+    check(ktxt == frontMatter(source: "møte.m4a") + txt.replacingOccurrences(of: "Hans Martin", with: "SPEAKER_00"),
+          "txt med kilde: \(ktxt.debugDescription)")
 
     // Prompten til referatet bruker samme rendering som TXT-eksporten. Én
     // funksjon, ellers driver de fra hverandre uten at noen merker det.
@@ -213,7 +220,7 @@ func runSelfcheckAndExit() -> Never {
     // Formatvalg: kun det som er bedt om skrives, og bare det.
     let only = URL.temporaryDirectory.appending(path: "schous-selfcheck-srt-\(getpid())")
     try! FileManager.default.createDirectory(at: only, withIntermediateDirectories: true)
-    let written = try! writeOutputs(segs, to: only, base: "t", formats: [.srt])
+    let written = try! writeOutputs(segs, to: only, base: "t", source: nil, formats: [.srt])
     check(written.map(\.lastPathComponent) == ["t.srt"], "formatvalg: \(written)")
     let left = try! FileManager.default.contentsOfDirectory(atPath: only.path).sorted()
     check(left == ["t.srt"], "formatvalg skrev mer enn bedt om: \(left)")
@@ -252,7 +259,11 @@ private func verifyAgainstBackend(base: URL) {
     let tmp = URL.temporaryDirectory.appending(path: "schous-verify-\(getpid())")
     try! FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: tmp) }
-    try! writeOutputs(segs, to: tmp, base: name)
+    // Kilden står i backendens egen TXT; output fra før front matter har ingen.
+    let theirTxt = (try? String(contentsOf: dir.appending(path: "\(name).txt"), encoding: .utf8)) ?? ""
+    let source = theirTxt.firstMatch(of: /\A---\nkilde: (".*")\n---\n\n/)
+        .flatMap { try? JSONDecoder().decode(String.self, from: Data($0.1.utf8)) }
+    try! writeOutputs(segs, to: tmp, base: name, source: source)
 
     for ext in ["txt", "srt"] {
         let mine = try! String(contentsOf: tmp.appending(path: "\(name).\(ext)"), encoding: .utf8)
@@ -527,7 +538,7 @@ private func summarizerSelfcheck() {
                          using: Summary.defaultPrompt).contains("(none)"),
           "tom kontekst skal bli (none)")
     // Kilden står øverst i referatfila, og forsvinner igjen når fila lastes inn.
-    let fm = Summary.frontMatter(source: #"Møte: "plan".m4a"#)
+    let fm = frontMatter(source: #"Møte: "plan".m4a"#)
     check(fm == "---\nkilde: \"Møte: \\\"plan\\\".m4a\"\n---\n\n", "front matter: \(fm.debugDescription)")
     check(Summary.body(fm + "# Referat\n") == "# Referat\n", "body strippet ikke front matter")
     check(Summary.body("# Gammelt\n---\nx") == "# Gammelt\n---\nx", "body rørte et referat uten front matter")

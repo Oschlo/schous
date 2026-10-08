@@ -34,11 +34,19 @@ func transcriptText(_ segs: [Segment], names: [String: String] = [:]) -> String 
     }.joined(separator: "\n") + "\n"
 }
 
+/// Øverst i TXT og referatet, så en agent finner opptaket igjen. Port av
+/// `front_matter` i transcribe.py. Bare filnavnet: fila kan flyttes. JSON-quoting
+/// er gyldig YAML og tåler kolon og «"» i navnet.
+func frontMatter(source: String) -> String {
+    let quoted = String(data: try! JSONEncoder().encode(source), encoding: .utf8)!
+    return "---\nkilde: \(quoted)\n---\n\n"
+}
+
 /// Port av write_outputs (transcribe.py:122-130). `names` mapper SPEAKER_00 → visningsnavn.
 /// Skriver formatene i `formats` som <base>.txt / .srt / .json og returnerer stiene.
 /// `formats` er default alle tre, slik backend gjør — selfcheck sammenligner mot den.
 @discardableResult
-func writeOutputs(_ segs: [Segment], to dir: URL, base: String, names: [String: String] = [:],
+func writeOutputs(_ segs: [Segment], to dir: URL, base: String, source: String?, names: [String: String] = [:],
                   formats: Set<OutputFormat> = Set(OutputFormat.allCases)) throws -> [URL] {
     func label(_ s: Segment) -> String { names[s.speaker] ?? s.speaker }
     func url(_ f: OutputFormat) -> URL { dir.appendingPathComponent(base + "." + f.rawValue) }
@@ -46,7 +54,8 @@ func writeOutputs(_ segs: [Segment], to dir: URL, base: String, names: [String: 
     var written: [URL] = []
 
     if formats.contains(.txt) {
-        try transcriptText(segs, names: names).write(to: url(.txt), atomically: true, encoding: .utf8)
+        // Ikke i transcriptText: den er også referat-prompten, og der hører kilden ikke hjemme.
+        try ((source.map { frontMatter(source: $0) } ?? "") + transcriptText(segs, names: names)).write(to: url(.txt), atomically: true, encoding: .utf8)
         written.append(url(.txt))
     }
 
